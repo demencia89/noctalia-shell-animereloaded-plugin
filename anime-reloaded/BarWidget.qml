@@ -20,6 +20,29 @@ Item {
         return value !== undefined && value !== null ? value : fallback
     }
 
+    function _normaliseIconColorKey(key) {
+        switch (String(key || "")) {
+        case "mPrimary":
+        case "primary":
+            return "primary"
+        case "mSecondary":
+        case "secondary":
+            return "secondary"
+        case "mTertiary":
+        case "tertiary":
+            return "tertiary"
+        case "error":
+        case "mError":
+            return "error"
+        case "mOnSurface":
+        case "mOnSurfaceVariant":
+        case "none":
+            return "none"
+        default:
+            return "primary"
+        }
+    }
+
     // Per-screen sizing (required by Noctalia bar widget spec)
     readonly property string screenName:  screen?.name ?? ""
     readonly property real capsuleHeight: Style.getCapsuleHeightForScreen(screenName)
@@ -30,7 +53,7 @@ Item {
     readonly property string widgetText:
         _settingValue("barWidgetText", widgetDefaults.barWidgetText || "AnimeReloaded")
     readonly property string iconColorKey:
-        _settingValue("barWidgetIconColor", widgetDefaults.barWidgetIconColor || "mPrimary")
+        _normaliseIconColorKey(_settingValue("barWidgetIconColor", widgetDefaults.barWidgetIconColor || "primary"))
     readonly property color resolvedIconColor: Color.resolveColorKey(iconColorKey)
 
     readonly property real contentWidth:  row.implicitWidth + Style.marginM * 2

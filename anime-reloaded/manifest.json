@@ -1,7 +1,7 @@
 {
   "id": "anime-reloaded",
   "name": "AnimeReloaded",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "minNoctaliaVersion": "3.6.0",
   "author": "demencia89",
   "official": false,
@@ -39,7 +39,7 @@
       "lastPanelTabIndex": 1,
       "barWidgetIconName": "device-tv",
       "barWidgetText": "AnimeReloaded",
-      "barWidgetIconColor": "mPrimary"
+      "barWidgetIconColor": "primary"
     },
     "providers": {
       "metadata": {
