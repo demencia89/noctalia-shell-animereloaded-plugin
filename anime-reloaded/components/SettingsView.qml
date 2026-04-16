@@ -9,6 +9,7 @@ Item {
 
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
+    readonly property bool showMalAdvancedControls: false
     property string malInspectorFilter: ""
     readonly property var malInspectorEntries: {
         var _ = anime?.libraryVersion ?? 0
@@ -24,6 +25,20 @@ Item {
         settingsView._filterMalInspectorEntries(malInspectorEntries, effectiveMalInspectorFilter)
 
     signal backRequested()
+
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
+    function _withAlpha(color, alpha) {
+        return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function _outlineVariantColor() {
+        return _themeColor("mOutlineVariant",
+            _themeColor("mOutline", Color.mOnSurfaceVariant))
+    }
 
     function _malToneFill(tone, dense) {
         var alpha = dense === true ? 0.94 : 0.88
@@ -44,7 +59,7 @@ Item {
             return Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.34)
         if (tone === "primary")
             return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.34)
-        return Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+        return _withAlpha(_outlineVariantColor(), 0.38)
     }
 
     function _malToneText(tone) {
@@ -234,7 +249,7 @@ Item {
         letterSpacing: 0.3
         idleBackgroundColor: Color.mSurface
         hoverBackgroundColor: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
-        idleBorderColor: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.55)
+        idleBorderColor: settingsView._withAlpha(settingsView._outlineVariantColor(), 0.55)
         hoverTextColor: Color.mPrimary
         idleTextColor: Color.mOnSurface
     }
@@ -253,7 +268,7 @@ Item {
         border.width: input.activeFocus ? 1.5 : 1
         border.color: input.activeFocus
             ? Color.mPrimary
-            : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.5)
+            : settingsView._withAlpha(settingsView._outlineVariantColor(), 0.5)
 
         Behavior on border.color { ColorAnimation { duration: 160 } }
 
@@ -278,7 +293,9 @@ Item {
             clip: true
             selectByMouse: true
             echoMode: fieldRoot.secret ? TextInput.Password : TextInput.Normal
-            onTextChanged: fieldRoot.textEdited(text)
+            onTextEdited: function() {
+                fieldRoot.textEdited(text)
+            }
         }
 
         Text {
@@ -322,7 +339,7 @@ Item {
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                 height: 1
-                color: Color.mOutlineVariant
+                color: _outlineVariantColor()
                 opacity: 0.35
             }
 
@@ -352,7 +369,7 @@ Item {
                     radius: 20
                     color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
                     border.width: 1
-                    border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.45)
+                    border.color: _withAlpha(_outlineVariantColor(), 0.45)
 
                     Row {
                         anchors {
@@ -421,7 +438,7 @@ Item {
                         radius: 18
                         color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.7)
                         border.width: 1
-                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                        border.color: _withAlpha(_outlineVariantColor(), 0.38)
                         implicitHeight: heroColumn.implicitHeight + 28
 
                         Column {
@@ -454,7 +471,7 @@ Item {
                         radius: 20
                         color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                         border.width: 1
-                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
                         implicitHeight: panelSection.implicitHeight + 32
 
                         Column {
@@ -525,7 +542,7 @@ Item {
                         radius: 20
                         color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                         border.width: 1
-                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
                         implicitHeight: posterSection.implicitHeight + 32
 
                         Column {
@@ -598,7 +615,7 @@ Item {
                         radius: 20
                         color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                         border.width: 1
-                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
                         implicitHeight: providerSection.implicitHeight + 32
 
                         Column {
@@ -671,7 +688,7 @@ Item {
                         radius: 20
                         color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                         border.width: 1
-                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
                         implicitHeight: malSection.implicitHeight + 32
 
                         Column {
@@ -725,7 +742,7 @@ Item {
                                 radius: 18
                                 color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.56)
                                 border.width: 1
-                                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.32)
+                                border.color: _withAlpha(_outlineVariantColor(), 0.32)
                                 implicitHeight: malStatusColumn.implicitHeight + 22
 
                                 Column {
@@ -747,7 +764,7 @@ Item {
                                             border.width: 1
                                             border.color: anime?.malSync?.enabled
                                                 ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.42)
-                                                : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                                                : _withAlpha(_outlineVariantColor(), 0.4)
 
                                             Text {
                                                 id: statusLabel
@@ -767,7 +784,7 @@ Item {
                                             radius: 13
                                             color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
                                             border.width: 1
-                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                            border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                             Text {
                                                 id: autoPushLabel
@@ -914,7 +931,7 @@ Item {
                                                     radius: 16
                                                     color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.9)
                                                     border.width: 1
-                                                    border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                                                    border.color: _withAlpha(_outlineVariantColor(), 0.34)
                                                     implicitHeight: inspectorEntryColumn.implicitHeight + 18
 
                                                     Column {
@@ -1008,7 +1025,8 @@ Item {
                             }
 
                             Column {
-                                visible: anime?.malSyncShowAdvanced ?? false
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
                                 spacing: 8
 
                                 Text {
@@ -1022,12 +1040,15 @@ Item {
                                     width: parent.width
                                     value: anime?.malSync?.clientId || ""
                                     placeholderText: "MyAnimeList client id"
-                                    onTextEdited: if (anime) anime.setMalSyncField("clientId", text)
+                                    onTextEdited: function(text) {
+                                        if (anime) anime.setMalSyncField("clientId", text)
+                                    }
                                 }
                             }
 
                             Column {
-                                visible: anime?.malSyncShowAdvanced ?? false
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
                                 spacing: 8
 
                                 Text {
@@ -1042,12 +1063,15 @@ Item {
                                     value: anime?.malSync?.clientSecret || ""
                                     placeholderText: "Optional client secret"
                                     secret: true
-                                    onTextEdited: if (anime) anime.setMalSyncField("clientSecret", text)
+                                    onTextEdited: function(text) {
+                                        if (anime) anime.setMalSyncField("clientSecret", text)
+                                    }
                                 }
                             }
 
                             Column {
-                                visible: anime?.malSyncShowAdvanced ?? false
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
                                 spacing: 8
 
                                 Text {
@@ -1061,12 +1085,15 @@ Item {
                                     width: parent.width
                                     value: anime?.malSync?.redirectUri || ""
                                     placeholderText: "Registered redirect URI, if your MAL app requires one"
-                                    onTextEdited: if (anime) anime.setMalSyncField("redirectUri", text)
+                                    onTextEdited: function(text) {
+                                        if (anime) anime.setMalSyncField("redirectUri", text)
+                                    }
                                 }
                             }
 
                             Column {
-                                visible: anime?.malSyncShowAdvanced ?? false
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
                                 spacing: 8
 
                                 Text {
@@ -1080,11 +1107,14 @@ Item {
                                     width: parent.width
                                     value: anime?.malSyncAuthCode || ""
                                     placeholderText: "Paste the `code` query parameter from the browser redirect"
-                                    onTextEdited: if (anime) anime.malSyncAuthCode = text
+                                    onTextEdited: function(text) {
+                                        if (anime) anime.malSyncAuthCode = text
+                                    }
                                 }
                             }
 
                             Column {
+                                width: parent.width
                                 spacing: 8
 
                                 Text {
@@ -1116,7 +1146,7 @@ Item {
                                     width: parent.width
                                     text: anime?.malSync?.autoPush
                                         ? "Auto Push sends local watch changes to MyAnimeList after a short delay. Pulls and imports never push back automatically."
-                                        : "Manual means AnimeReloaded only updates MyAnimeList when you press Push To MAL."
+                                        : "Manual only updates MyAnimeList when you press Push To MAL."
                                     wrapMode: Text.Wrap
                                     lineHeight: 1.35
                                     font.pixelSize: 10
@@ -1169,6 +1199,7 @@ Item {
                                 }
 
                                 ActionChip {
+                                    visible: settingsView.showMalAdvancedControls
                                     text: anime?.malSyncShowAdvanced ? "Hide Advanced" : "Advanced"
                                     leadingText: anime?.malSyncShowAdvanced ? "-" : "+"
                                     enabled: !(anime?.isMalSyncBusy ?? false)
@@ -1187,7 +1218,8 @@ Item {
                             }
 
                             Text {
-                                visible: !(anime?.malSyncShowAdvanced ?? false)
+                                visible: settingsView.showMalAdvancedControls
+                                    && !(anime?.malSyncShowAdvanced ?? false)
                                 width: parent.width
                                 text: "Advanced OAuth overrides stay hidden unless you need to debug a custom MAL app."
                                 wrapMode: Text.Wrap
@@ -1198,7 +1230,8 @@ Item {
                             }
 
                             Flow {
-                                visible: anime?.malSyncShowAdvanced ?? false
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
                                 width: parent.width
                                 spacing: 10
 

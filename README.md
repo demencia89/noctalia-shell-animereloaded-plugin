@@ -2,98 +2,97 @@
 
 AnimeReloaded is the next-generation continuation of the original Noctalia Anime plugin.
 
-Version `3.0.0` is the first major AnimeReloaded release baseline.
+It keeps the working AllAnime playback path, but moves metadata, discovery, seasons, and airing-aware feed logic onto AniList so the plugin can evolve without tying the whole UI to the stream backend.
 
-It now runs as a hybrid provider plugin:
+Version `3.0.0` is the first AnimeReloaded release baseline. This repository now also includes follow-up UI/runtime polish on top of that hybrid architecture.
 
-- AniList for metadata, search, relations, airing data, and feed decisions
-- AllAnime for episode lists, stream resolution, and playback
-- a local mapping/cache layer between AniList media ids and AllAnime show ids
-- MyAnimeList as an optional account sync target for library progress
+## Highlights
 
-## Release Status
+- AniList-backed browse, search, detail pages, titles, synonyms, relations, seasons, and airing metadata
+- AllAnime preserved for episode resolution, stream lookup, and playback
+- season-aware detail flow so selecting another season opens that season and its episodes instead of flattening the whole franchise
+- local AniList `<->` AllAnime mapping/cache layer for safe playback resolution
+- feed focused on followed currently airing shows and newly relevant release events
+- MyAnimeList sync for account progress, without switching in-app metadata away from AniList
+- polished Noctalia-native UI with smoother card scrolling, consistent chips/buttons, and refreshed library/settings flows
+
+## Current Status
 
 - Plugin id: `anime-reloaded`
 - Plugin name: `AnimeReloaded`
 - Runtime folder: `anime-reloaded/`
-- Current metadata provider: `anilist`
-- Current stream provider: `allanime`
-- Current playback path: Noctalia QML -> `provider_cli.py` -> AniList metadata -> AllAnime resolver -> `mpv`
-- Intended repository name: `noctalia-shell-animereloaded-plugin`
+- Repository: `noctalia-shell-animereloaded-plugin`
 - Current version: `3.0.0`
+- Metadata provider: `anilist`
+- Stream provider: `allanime`
+- Playback path: Noctalia QML -> `provider_cli.py` -> AniList metadata -> AllAnime mapping/resolution -> `mpv`
 
-## What 3.0.0 Includes
+## Screenshots
 
-- AniList-backed browse, search, detail, seasons, relations, and airing-aware feed decisions
-- AllAnime playback preserved for episode resolution and streaming
-- local AniList <-> AllAnime mapping/cache infrastructure for season-safe playback resolution
-- smoother browse and library interactions with polished chip/button behavior
-- feed groundwork oriented around followed airing shows and newly relevant episode events
-- optional MyAnimeList sync with browser login, pull, push, auto-push, badges, and per-title sync state
+Desktop integration preview:
 
-## Current Focus
+![AnimeReloaded desktop integration](docs/screenshots/top-bar-integration.png)
 
-- keep playback stable while metadata and feed evolve independently
-- keep the UI behavior cohesive without redesigning the plugin away from Noctalia patterns
-- keep the codebase easy to extend for future metadata and notification work
+Bar widget close-up:
 
-## Why This Repo Exists
+![AnimeReloaded bar widget](docs/screenshots/bar-widget.png)
 
-- The original Anime plugin is still the stable baseline.
-- AnimeReloaded is the branch for the next refactor phase.
-- Playback stays on AllAnime so the working player flow is preserved.
-- Metadata has been moved to AniList so search, show detail, and feed logic can evolve independently from the stream backend.
-- The provider split is now concrete enough for future metadata improvements without rewriting playback again.
+Library panel:
 
-## Hybrid Architecture
+![AnimeReloaded library panel](docs/screenshots/panel-library.png)
+
+## What Works Now
+
+- Browse and search are AniList-backed.
+- Detail pages use AniList metadata and show season-level navigation, relations, and season-specific episodes.
+- Playback still resolves through AllAnime when the user actually starts an episode.
+- Library supports richer progression filters such as `Continue`, `In Progress`, `Up To Date`, and `Completed`, plus type filters.
+- Followed airing shows feed into a cleaner Feed tab oriented around release relevance instead of generic library noise.
+- Detail and library progress actions support catching up or marking fully watched when appropriate.
+- MyAnimeList sync supports browser login, refresh, pull, push, optional auto-push, per-title sync badges, and a practical sync-status overview.
+
+## Architecture
 
 - `anime-reloaded/providers/anilist.py`
-  AniList-backed metadata provider for browse/search/detail/feed metadata.
+  AniList-backed metadata provider for browse, search, detail, seasons, relations, airing data, and feed metadata.
 - `anime-reloaded/providers/allanime.py`
-  AllAnime metadata compatibility layer plus the active stream resolver.
+  Current stream provider and episode/stream resolver.
 - `anime-reloaded/providers/anilist_allanime_mapper.py`
-  Lazy AniList -> AllAnime resolver used when detail or playback needs stream episodes.
+  AniList -> AllAnime mapping used when detail or playback needs a concrete stream source.
 - `anime-reloaded/providers/allanime_anilist_mapper.py`
-  Pragmatic legacy AllAnime -> AniList mapper used to keep old library entries feed-compatible.
+  Compatibility mapper used for older AllAnime-origin library/feed data.
 - `anime-reloaded/providers/mapping_cache.py`
-  Local cache for cross-provider id mappings and mapping debug data.
+  Local cache and debug surface for cross-provider id resolution.
+- `anime-reloaded/provider_cli.py`
+  Provider-aware Python bridge used by the QML runtime.
 
-## Feed Behavior
+## Feed Direction
 
-- Feed now uses AniList airing metadata instead of relying only on AllAnime episode snapshots.
-- Feed is limited to followed shows with a clear next-airing context and a recent watched position.
-- Legacy library entries that still point at AllAnime metadata are reverse-mapped into AniList when the mapping is confident.
-- Uncertain mappings are skipped instead of guessing.
-- The current goal is a practical startup notification list for followed airing titles, not a noisy activity feed.
+Feed is no longer treated as “library items close to caught up”.
+
+Current behavior is centered on followed airing shows:
+
+- AniList airing status and next-airing data drive eligibility
+- followed titles are evaluated as specific AniList season/media entries
+- newly relevant episode events are surfaced more clearly
+- uncertain legacy mappings are skipped instead of guessed
+
+This keeps Feed aligned with the long-term goal of becoming a practical release notification center.
 
 ## MyAnimeList Sync
 
-- AniList remains the canonical metadata source inside the plugin UI.
-- MyAnimeList is now an optional account sync target for the local library.
-- The current MAL sync pass is intentionally scoped:
-  - browser auth with automatic localhost callback capture from Settings
-  - manual code exchange remains available as a fallback in Advanced
-  - explicit `Pull From MAL` and `Push To MAL` actions
-  - optional auto-push after local library changes
-  - per-show MAL status badges in Library and Detail based on mapping presence and the latest sync result
-  - pull can import MAL-only titles when they resolve cleanly to AniList metadata
-  - playback for imported titles still resolves lazily through the AniList -> AllAnime mapping layer
-  - settings now present a practical sync overview centered on attention-required titles, ready-to-push titles, and recently synced titles
+AnimeReloaded keeps AniList as the canonical in-app metadata source and uses MyAnimeList only for account sync.
 
-This keeps the metadata/playback split intact:
+Current MAL sync behavior:
 
-- AniList for search, detail, seasons, relations, airing data, and feed logic
-- AllAnime for episode lists, stream resolution, and playback
-- MyAnimeList for account-side watch progress synchronization
+- browser auth with localhost callback capture from Settings
+- `Pull From MAL` to merge external progress and import MAL-only titles that resolve confidently to AniList
+- `Push To MAL` to send local AnimeReloaded progress outward
+- optional auto-push after local watch changes
+- per-show MAL badges in Library and Detail
+- sync overview focused on titles needing attention, ready-to-push titles, and recently synced titles
 
-## Current Limitations
-
-- Playback still depends on AllAnime mappings existing or being resolved during detail fetch.
-- Legacy library entries are feed-compatible, but they are not fully migrated in-place to AniList ids yet.
-- Feed remains a pragmatic release alert list, not a full notification system yet.
-- MyAnimeList pull skips titles that do not map confidently back to AniList metadata.
-- Imported MAL titles still need a resolvable AniList -> AllAnime mapping before playback can start.
-- Some remaining UI/runtime warnings are still being polished outside the core metadata, playback, and sync flows.
+Advanced OAuth override controls are intentionally hidden for normal use right now.
 
 ## Repository Layout
 
@@ -102,10 +101,12 @@ This keeps the metadata/playback split intact:
 ├── anime-reloaded/         # plugin runtime for catalog installs
 │   ├── provider_cli.py     # provider-aware command bridge used by QML
 │   ├── providers/          # metadata, stream, and mapping layers
+│   ├── components/         # Browse, Library, Detail, Feed, Settings UI
 │   ├── Main.qml
 │   ├── Panel.qml
 │   ├── BarWidget.qml
 │   └── manifest.json
+├── docs/screenshots/       # README screenshots
 ├── manifest.json           # local-install compatibility manifest
 ├── registry.json
 └── README.md
@@ -126,15 +127,30 @@ The root manifest keeps local checkouts loadable, while the actual plugin runtim
 
 - `python3` in `$PATH`
 - `mpv` in `$PATH`
-- Network access to `graphql.anilist.co`, `api.allanime.day`, and resolved stream hosts
+- network access to AniList, AllAnime, MyAnimeList, and resolved stream hosts
 
-## Notes
+## Local Runtime Files
 
-- `allanime.py` is still the playback backend.
-- Runtime feed/cache files now use `anime-reloaded-*` names inside the plugin directory.
-- Mapping cache entries are stored locally in `anime-reloaded-provider-map.json`.
-- local MAL auth/session data is stored in `anime-reloaded-mal-config.json` and should stay untracked
-- `registry.json` is generated from the runtime manifest.
+AnimeReloaded stores local runtime data in the plugin directory with `anime-reloaded-*` names, including:
+
+- `anime-reloaded-library.json`
+- `anime-reloaded-feed-cache.json`
+- `anime-reloaded-provider-map.json`
+- `anime-reloaded-mal-config.json`
+
+`anime-reloaded-mal-config.json` contains local MAL auth/session data and should remain untracked.
+
+## Current Limitations
+
+- Playback still depends on a valid AniList -> AllAnime mapping.
+- Some imported MAL titles may sync correctly but still need a resolvable AllAnime mapping before playback works.
+- Feed is already airing-aware, but it is still a pragmatic release alert list rather than a full notification platform.
+- Legacy library/feed compatibility exists, but not every old entry is migrated in-place automatically.
+
+## Related Links
+
+- AllAnime backend implementation: [anime-reloaded/providers/allanime.py](https://github.com/demencia89/noctalia-shell-animereloaded-plugin/blob/main/anime-reloaded/providers/allanime.py)
+- Legacy Anime plugin: [demencia89/noctalia-shell-anime-plugin](https://github.com/demencia89/noctalia-shell-anime-plugin)
 
 ## License
 

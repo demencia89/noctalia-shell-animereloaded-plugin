@@ -34,6 +34,38 @@ Item {
     signal animeSelected(var show)
     signal settingsRequested()
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
+    function _withAlpha(color, alpha) {
+        return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function _outlineVariantColor() {
+        return _themeColor("mOutlineVariant",
+            _themeColor("mOutline", Color.mOnSurfaceVariant))
+    }
+
+    function _errorContainerColor() {
+        return _themeColor("mErrorContainer",
+            Qt.tint(Color.mSurface, Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)))
+    }
+
+    function _onErrorContainerColor() {
+        return _themeColor("mOnErrorContainer", Color.mError)
+    }
+
+    function _primaryContainerColor() {
+        return _themeColor("mPrimaryContainer",
+            Qt.tint(Color.mSurface, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)))
+    }
+
+    function _onPrimaryContainerColor() {
+        return _themeColor("mOnPrimaryContainer", Color.mPrimary)
+    }
+
     function openEntry(entry) {
         libraryView.animeSelected({
             id:               entry.id,
@@ -227,7 +259,7 @@ Item {
             return Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.34)
         if (tone === "primary")
             return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.34)
-        return Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.36)
+        return _withAlpha(_outlineVariantColor(), 0.36)
     }
 
     function _malBadgeTextColor(badge) {
@@ -287,7 +319,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.5
+                height: 1; color: _outlineVariantColor(); opacity: 0.5
             }
 
             RowLayout {
@@ -306,7 +338,7 @@ Item {
                     border.width: 1
                     border.color: libraryTitleArea.containsMouse
                         ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28)
-                        : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        : _withAlpha(_outlineVariantColor(), 0.4)
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Behavior on border.color { ColorAnimation { duration: 180 } }
 
@@ -350,7 +382,7 @@ Item {
                     radius: 18
                     color: Color.mSurface
                     visible: false
-                    border.color: librarySearchField.activeFocus ? Color.mPrimary : Color.mOutlineVariant
+                    border.color: librarySearchField.activeFocus ? Color.mPrimary : _outlineVariantColor()
                     border.width: librarySearchField.activeFocus ? 1.5 : 1
 
                     TextInput {
@@ -393,13 +425,13 @@ Item {
                             width: 18
                             height: 18
                             radius: 9
-                            color: libraryClearArea.containsMouse ? Color.mPrimaryContainer : Color.mSurfaceVariant
+                            color: libraryClearArea.containsMouse ? _primaryContainerColor() : Color.mSurfaceVariant
                             Behavior on color { ColorAnimation { duration: 140 } }
                         }
                         Text {
                             anchors.centerIn: parent
                             text: "✕"
-                            color: libraryClearArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
+                            color: libraryClearArea.containsMouse ? _onPrimaryContainerColor() : Color.mOnSurfaceVariant
                             font.pixelSize: 9
                             font.bold: true
                             Behavior on color { ColorAnimation { duration: 140 } }
@@ -419,7 +451,7 @@ Item {
                     width: libCountText.implicitWidth + 20
                     radius: 15
                     color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.92)
-                    border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.42)
+                    border.color: _withAlpha(_outlineVariantColor(), 0.42)
                     border.width: 1
 
                     Text {
@@ -464,7 +496,7 @@ Item {
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                 height: 1
-                color: Color.mOutlineVariant
+                color: _outlineVariantColor()
                 opacity: 0.32
             }
 
@@ -549,7 +581,7 @@ Item {
                                 radius: 16
                                 color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
                                 border.width: 1
-                                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                                border.color: _withAlpha(_outlineVariantColor(), 0.34)
                                 implicitHeight: progressColumn.implicitHeight + 18
 
                                 Column {
@@ -592,7 +624,7 @@ Item {
                                 radius: 16
                                 color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
                                 border.width: 1
-                                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                                border.color: _withAlpha(_outlineVariantColor(), 0.34)
                                 implicitHeight: typeColumn.implicitHeight + 18
 
                                 Column {
@@ -644,7 +676,7 @@ Item {
                 radius: 20
                 color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                 border.width: 1
-                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                border.color: _withAlpha(_outlineVariantColor(), 0.4)
                 implicitHeight: emptyColumn.implicitHeight + 34
 
                 Column {
@@ -871,7 +903,7 @@ Item {
                                             width: libScoreText.implicitWidth + 10
                                             color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
                                             border.width: 1
-                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                            border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                             Text {
                                                 id: libScoreText
@@ -933,7 +965,7 @@ Item {
                                             ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.95)
                                             : (progressState.key === "up-to-date"
                                                 ? Qt.rgba(Color.mSecondary.r, Color.mSecondary.g, Color.mSecondary.b, 0.95)
-                                                : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.42))
+                                                : _withAlpha(_outlineVariantColor(), 0.42))
 
                                         Text {
                                             id: statusText
@@ -1047,7 +1079,7 @@ Item {
                                     }
                                     height: 3
                                     radius: 2
-                                    color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.22)
+                                    color: _withAlpha(_outlineVariantColor(), 0.22)
                                     visible: activeProgressRatio > 0
 
                                     Rectangle {
@@ -1066,7 +1098,7 @@ Item {
                                 height: 32
                                 radius: 16
                                 color: libraryActionArea.containsMouse
-                                    ? Qt.rgba(Color.mErrorContainer.r, Color.mErrorContainer.g, Color.mErrorContainer.b, 0.96)
+                                    ? _withAlpha(_errorContainerColor(), 0.96)
                                     : Color.mPrimary
                                 border.width: 1
                                 border.color: libraryActionArea.containsMouse
@@ -1093,7 +1125,7 @@ Item {
                                     text: "−"
                                     font.pixelSize: 18
                                     font.bold: true
-                                    color: Color.mOnErrorContainer
+                                    color: _onErrorContainerColor()
                                     opacity: libraryActionArea.containsMouse ? 1 : 0
                                     scale: libraryActionArea.containsMouse ? 1 : 0.7
                                     Behavior on opacity { NumberAnimation { duration: 110 } }

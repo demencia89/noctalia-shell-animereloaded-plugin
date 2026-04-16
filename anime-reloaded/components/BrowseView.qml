@@ -15,6 +15,38 @@ Item {
     signal animeSelected(var show)
     signal settingsRequested()
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
+    function _withAlpha(color, alpha) {
+        return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function _outlineVariantColor() {
+        return _themeColor("mOutlineVariant",
+            _themeColor("mOutline", Color.mOnSurfaceVariant))
+    }
+
+    function _errorContainerColor() {
+        return _themeColor("mErrorContainer",
+            Qt.tint(Color.mSurface, Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)))
+    }
+
+    function _onErrorContainerColor() {
+        return _themeColor("mOnErrorContainer", Color.mError)
+    }
+
+    function _primaryContainerColor() {
+        return _themeColor("mPrimaryContainer",
+            Qt.tint(Color.mSurface, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)))
+    }
+
+    function _onPrimaryContainerColor() {
+        return _themeColor("mOnPrimaryContainer", Color.mPrimary)
+    }
+
     function openEntry(entry) {
         browseView.animeSelected({
             id: entry.id,
@@ -184,7 +216,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.5
+                height: 1; color: _outlineVariantColor(); opacity: 0.5
             }
 
             RowLayout {
@@ -204,7 +236,7 @@ Item {
                     border.width: 1
                     border.color: browseTitleArea.containsMouse
                         ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28)
-                        : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                        : _withAlpha(_outlineVariantColor(), 0.4)
                     Behavior on color { ColorAnimation { duration: 180 } }
                     Behavior on border.color { ColorAnimation { duration: 180 } }
 
@@ -246,7 +278,7 @@ Item {
                     height: 36; radius: 18
                     color: Color.mSurface
                     visible: false
-                    border.color: searchField.activeFocus ? Color.mPrimary : Color.mOutlineVariant
+                    border.color: searchField.activeFocus ? Color.mPrimary : _outlineVariantColor()
                     border.width: searchField.activeFocus ? 1.5 : 1
 
                     TextInput {
@@ -284,13 +316,13 @@ Item {
                         Rectangle {
                             anchors.centerIn: parent
                             width: 18; height: 18; radius: 9
-                            color: clearSearchArea.containsMouse ? Color.mPrimaryContainer : Color.mSurfaceVariant
+                            color: clearSearchArea.containsMouse ? _primaryContainerColor() : Color.mSurfaceVariant
                             Behavior on color { ColorAnimation { duration: 140 } }
                         }
                         Text {
                             anchors.centerIn: parent
                             text: "✕"
-                            color: clearSearchArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
+                            color: clearSearchArea.containsMouse ? _onPrimaryContainerColor() : Color.mOnSurfaceVariant
                             font.pixelSize: 9; font.bold: true
                             Behavior on color { ColorAnimation { duration: 140 } }
                         }
@@ -329,7 +361,7 @@ Item {
                     width: modeRow.implicitWidth + 16
                     radius: 14
                     color: Color.mSurface
-                    border.color: Color.mOutlineVariant; border.width: 1
+                    border.color: _outlineVariantColor(); border.width: 1
 
                     Row {
                         id: modeRow
@@ -347,7 +379,7 @@ Item {
                                 Rectangle {
                                     anchors { fill: parent; margins: 3 }
                                     radius: 11
-                                    color: active ? Color.mPrimary : (modeArea.containsMouse ? Color.mPrimaryContainer : "transparent")
+                                    color: active ? Color.mPrimary : (modeArea.containsMouse ? _primaryContainerColor() : "transparent")
                                     Behavior on color { ColorAnimation { duration: 160 } }
                                 }
                                 Text {
@@ -355,7 +387,7 @@ Item {
                                     anchors.centerIn: parent
                                     text: modelData.toUpperCase()
                                     font.pixelSize: 10; font.letterSpacing: 1; font.bold: true
-                                    color: active ? Color.mOnPrimary : (modeArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant)
+                                    color: active ? Color.mOnPrimary : (modeArea.containsMouse ? _onPrimaryContainerColor() : Color.mOnSurfaceVariant)
                                     Behavior on color { ColorAnimation { duration: 160 } }
                                 }
                                 MouseArea {
@@ -545,7 +577,7 @@ Item {
                                     radius: 18
                                     color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.9)
                                     border.width: 1
-                                    border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                    border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                     Row {
                                         anchors.fill: parent
@@ -617,7 +649,7 @@ Item {
                                                 width: parent.width
                                                 height: 6
                                                 radius: 3
-                                                color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.26)
+                                                color: _withAlpha(_outlineVariantColor(), 0.26)
                                                 visible: progressRatio > 0
 
                                                 Rectangle {
@@ -666,7 +698,7 @@ Item {
 
                                                 StyledToolTip {
                                                     target: continueButtonArea
-                                                    shown: hovered
+                                                    shown: continueButtonArea.containsMouse
                                                     above: true
                                                     text: "Open details"
                                                 }
@@ -906,7 +938,7 @@ Item {
                                             width: scoreText.implicitWidth + 10
                                             color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
                                             border.width: 1
-                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                            border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                             Text {
                                                 id: scoreText; anchors.centerIn: parent
@@ -924,7 +956,7 @@ Item {
                                             width: typeText.implicitWidth + 10
                                             color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
                                             border.width: 1
-                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.36)
+                                            border.color: _withAlpha(_outlineVariantColor(), 0.36)
 
                                             Text {
                                                 id: typeText; anchors.centerIn: parent
@@ -959,11 +991,11 @@ Item {
                                             width: epText.implicitWidth + 10
                                             color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
                                             border.width: 1
-                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                            border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                             Text {
                                                 id: epText; anchors.centerIn: parent
-                                                text: displayEpisodeCount + " ep"
+                                                text: parent.displayEpisodeCount + " ep"
                                                 font.pixelSize: 8; font.letterSpacing: 0.5
                                                 color: Color.mOnSurface
                                             }
@@ -993,13 +1025,13 @@ Item {
                                     visible: opacity > 0
                                     color: inLibrary
                                         ? (actionIsRemove
-                                            ? Qt.rgba(Color.mErrorContainer.r, Color.mErrorContainer.g, Color.mErrorContainer.b, 0.96)
+                                            ? _withAlpha(_errorContainerColor(), 0.96)
                                             : Color.mPrimary)
                                         : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.92)
                                     border.width: 1
                                     border.color: inLibrary
                                         ? (actionIsRemove ? Color.mError : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.6))
-                                        : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.42)
+                                        : _withAlpha(_outlineVariantColor(), 0.42)
                                     z: 3
 
                                     Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
@@ -1038,7 +1070,7 @@ Item {
                                         text: "−"
                                         font.pixelSize: 18
                                         font.bold: true
-                                        color: Color.mOnErrorContainer
+                                        color: _onErrorContainerColor()
                                         opacity: actionIsRemove ? 1 : 0
                                         scale: actionIsRemove ? 1 : 0.7
                                         Behavior on opacity { NumberAnimation { duration: 110 } }
@@ -1080,17 +1112,17 @@ Item {
                                     id: cardArea
                                     anchors.fill: parent; hoverEnabled: true
                                     onClicked: browseView.openEntry(entry)
-                                            }
-                                        }
-                                    }
-
-                                    StyledToolTip {
-                                        target: libraryActionArea
-                                        shown: libraryActionArea.containsMouse
-                                        above: false
-                                        text: inLibrary ? "Remove from library" : "Add to library"
-                                    }
                                 }
+
+                                StyledToolTip {
+                                    target: libraryActionArea
+                                    shown: libraryActionArea.containsMouse
+                                    above: false
+                                    text: inLibrary ? "Remove from library" : "Add to library"
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

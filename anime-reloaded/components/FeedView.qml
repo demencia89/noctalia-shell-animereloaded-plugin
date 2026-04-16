@@ -16,6 +16,16 @@ Item {
 
     signal animeSelected(var show, string nextEpisode)
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
+    function _outlineVariantColor() {
+        return _themeColor("mOutlineVariant",
+            _themeColor("mOutline", Color.mOnSurfaceVariant))
+    }
+
     function _showFromEntry(entry, posterOverride) {
         if (!entry) return null
         return {
@@ -144,7 +154,7 @@ Item {
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                 height: 1
-                color: Color.mOutlineVariant
+                color: _outlineVariantColor()
                 opacity: 0.5
             }
 

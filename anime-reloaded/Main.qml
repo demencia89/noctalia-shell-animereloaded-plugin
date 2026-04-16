@@ -65,6 +65,20 @@ Item {
     property var    browseCache: ({})
     property var    detailCache: ({})
 
+    function _preferredPanelScreen() {
+        if (pluginApi?.panelOpenScreen)
+            return pluginApi.panelOpenScreen
+        var screens = Quickshell.screens || []
+        if (!screens || screens.length === 0)
+            return null
+        for (var i = 0; i < screens.length; i++) {
+            var screen = screens[i]
+            if (screen && screen.x === 0 && screen.y === 0)
+                return screen
+        }
+        return screens[0]
+    }
+
     function _normalisePosterSize(nextPanelSize, nextPosterSize) {
         if (nextPanelSize === "small" && nextPosterSize === "small")
             return "medium"
@@ -78,6 +92,42 @@ Item {
             return JSON.parse(JSON.stringify(value))
         } catch (e) {
             return value
+        }
+    }
+
+    IpcHandler {
+        target: "plugin:AnimeReloaded"
+
+        function openPanel() {
+            if (pluginApi) {
+                pluginApi.withCurrentScreen(function(screen) {
+                    pluginApi.openPanel(screen)
+                })
+            }
+        }
+
+        function closePanel() {
+            if (pluginApi) {
+                var screen = root._preferredPanelScreen()
+                if (screen)
+                    pluginApi.closePanel(screen)
+            }
+        }
+
+        function togglePanel() {
+            if (pluginApi) {
+                pluginApi.withCurrentScreen(function(screen) {
+                    pluginApi.togglePanel(screen)
+                })
+            }
+        }
+
+        function openPanelOnPrimary() {
+            if (pluginApi) {
+                var screen = root._preferredPanelScreen()
+                if (screen)
+                    pluginApi.openPanel(screen)
+            }
         }
     }
 

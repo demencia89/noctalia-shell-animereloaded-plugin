@@ -134,38 +134,103 @@ Item {
         wheel.accepted = true
     }
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
+    function _withAlpha(color, alpha) {
+        return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function _surfaceColor() {
+        return _themeColor("mSurface", Qt.rgba(0.11, 0.12, 0.14, 1))
+    }
+
+    function _surfaceVariantColor() {
+        return _themeColor("mSurfaceVariant",
+            Qt.tint(_surfaceColor(), Qt.rgba(1, 1, 1, 0.06)))
+    }
+
+    function _primaryColor() {
+        return _themeColor("mPrimary", Qt.rgba(0.53, 0.65, 0.96, 1))
+    }
+
+    function _onPrimaryColor() {
+        return _themeColor("mOnPrimary", Qt.rgba(0.06, 0.08, 0.12, 1))
+    }
+
+    function _errorColor() {
+        return _themeColor("mError", Qt.rgba(0.91, 0.34, 0.33, 1))
+    }
+
+    function _tertiaryColor() {
+        return _themeColor("mTertiary", Qt.rgba(0.42, 0.82, 0.75, 1))
+    }
+
+    function _onSurfaceVariantColor() {
+        return _themeColor("mOnSurfaceVariant",
+            _themeColor("mOnSurface", Qt.rgba(0.92, 0.94, 0.97, 0.84)))
+    }
+
+    function _outlineColor() {
+        return _themeColor("mOutline", _onSurfaceVariantColor())
+    }
+
+    function _outlineVariantColor() {
+        return _themeColor("mOutlineVariant", _outlineColor())
+    }
+
+    function _primaryContainerColor() {
+        return _themeColor("mPrimaryContainer",
+            Qt.tint(_surfaceColor(), _withAlpha(_primaryColor(), 0.18)))
+    }
+
+    function _onPrimaryContainerColor() {
+        return _themeColor("mOnPrimaryContainer", _primaryColor())
+    }
+
+    function _errorContainerColor() {
+        return _themeColor("mErrorContainer",
+            Qt.tint(_surfaceColor(), _withAlpha(_errorColor(), 0.18)))
+    }
+
+    function _onErrorContainerColor() {
+        return _themeColor("mOnErrorContainer", _errorColor())
+    }
+
     function _malBadgeFill(badge) {
         var tone = String(badge?.tone || "")
-        var base = Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.94)
+        var base = _withAlpha(_surfaceColor(), 0.94)
         if (tone === "error")
-            return Qt.tint(base, Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18))
+            return Qt.tint(base, _withAlpha(_errorColor(), 0.18))
         if (tone === "accent")
-            return Qt.tint(base, Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.18))
+            return Qt.tint(base, _withAlpha(_tertiaryColor(), 0.18))
         if (tone === "primary")
-            return Qt.tint(base, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18))
-        return Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.92)
+            return Qt.tint(base, _withAlpha(_primaryColor(), 0.18))
+        return _withAlpha(_surfaceColor(), 0.92)
     }
 
     function _malBadgeBorder(badge) {
         var tone = String(badge?.tone || "")
         if (tone === "error")
-            return Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.34)
+            return _withAlpha(_errorColor(), 0.34)
         if (tone === "accent")
-            return Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.34)
+            return _withAlpha(_tertiaryColor(), 0.34)
         if (tone === "primary")
-            return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.34)
-        return Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.36)
+            return _withAlpha(_primaryColor(), 0.34)
+        return _withAlpha(_outlineVariantColor(), 0.36)
     }
 
     function _malBadgeTextColor(badge) {
         var tone = String(badge?.tone || "")
         if (tone === "error")
-            return Color.mError
+            return _errorColor()
         if (tone === "accent")
-            return Color.mTertiary
+            return _tertiaryColor()
         if (tone === "primary")
-            return Color.mPrimary
-        return Color.mOnSurfaceVariant
+            return _primaryColor()
+        return _onSurfaceVariantColor()
     }
 
     ColumnLayout {
@@ -181,7 +246,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.5
+                height: 1; color: _outlineVariantColor(); opacity: 0.5
             }
 
             RowLayout {
@@ -199,9 +264,9 @@ Item {
                     Layout.fillWidth: true
                     implicitHeight: 38
                     radius: 19
-                    color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+                    color: _withAlpha(_surfaceColor(), 0.88)
                     border.width: 1
-                    border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.4)
+                    border.color: _withAlpha(_outlineVariantColor(), 0.4)
 
                     Text {
                         anchors {
@@ -248,9 +313,9 @@ Item {
                     horizontalPadding: 14
                     controlHeight: 32
                     active: detailView._inLibrary
-                    activeColor: Color.mPrimaryContainer
+                    activeColor: detailView._primaryContainerColor()
                     activeHoverColor: Color.mPrimary
-                    activeTextColor: Color.mOnPrimaryContainer
+                    activeTextColor: detailView._onPrimaryContainerColor()
                     activeHoverTextColor: Color.mOnPrimary
                     onClicked: {
                         if (!anime?.currentAnime) return
@@ -331,8 +396,8 @@ Item {
                         height: 20
                         width: lastWatchedText.implicitWidth + 18
                         radius: 10
-                        color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
-                        border.color: Color.mPrimary
+                        color: detailView._withAlpha(detailView._primaryColor(), 0.12)
+                        border.color: detailView._primaryColor()
                         border.width: 1
 
                         Text {
@@ -341,7 +406,7 @@ Item {
                             text: parent.visible ? "Last: Ep. " + detailMetaFlow.parent.libraryEntry.lastWatchedEpNum : ""
                             font.pixelSize: 9
                             font.letterSpacing: 0.8
-                            color: Color.mPrimary
+                            color: detailView._primaryColor()
                         }
                     }
 
@@ -351,10 +416,10 @@ Item {
                         enabled: detailMetaFlow.parent.canApplyWatchAction
                         disabledOpacity: detailMetaFlow.parent.watchAction?.isComplete ? 0.92 : 0.45
                         active: detailMetaFlow.parent.watchAction?.isComplete || false
-                        activeColor: Color.mPrimaryContainer
-                        activeHoverColor: Color.mPrimaryContainer
-                        activeTextColor: Color.mOnPrimaryContainer
-                        activeHoverTextColor: Color.mOnPrimaryContainer
+                        activeColor: detailView._primaryContainerColor()
+                        activeHoverColor: detailView._primaryContainerColor()
+                        activeTextColor: detailView._onPrimaryContainerColor()
+                        activeHoverTextColor: detailView._onPrimaryContainerColor()
                         controlHeight: 22
                         horizontalPadding: 11
                         fontPixelSize: 9
@@ -426,16 +491,16 @@ Item {
                         horizontalPadding: 11
                         fontPixelSize: 9
                         letterSpacing: 0.6
-                        baseColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.1)
-                        hoverColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
-                        activeColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
-                        baseBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.24)
-                        hoverBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.42)
-                        activeBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.42)
-                        baseTextColor: Color.mError
-                        hoverTextColor: Color.mError
-                        activeTextColor: Color.mError
-                        activeHoverTextColor: Color.mError
+                        baseColor: detailView._withAlpha(detailView._errorColor(), 0.1)
+                        hoverColor: detailView._withAlpha(detailView._errorColor(), 0.18)
+                        activeColor: detailView._withAlpha(detailView._errorColor(), 0.18)
+                        baseBorderColor: detailView._withAlpha(detailView._errorColor(), 0.24)
+                        hoverBorderColor: detailView._withAlpha(detailView._errorColor(), 0.42)
+                        activeBorderColor: detailView._withAlpha(detailView._errorColor(), 0.42)
+                        baseTextColor: detailView._errorColor()
+                        hoverTextColor: detailView._errorColor()
+                        activeTextColor: detailView._errorColor()
+                        activeHoverTextColor: detailView._errorColor()
                         onClicked: {
                             if (!anime?.currentAnime) return
                             anime.removeShowFromMal(anime.currentAnime, true)
@@ -447,7 +512,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.3
+                height: 1; color: _outlineVariantColor(); opacity: 0.3
             }
         }
 
@@ -473,11 +538,11 @@ Item {
             // Dark gradient overlay
             Rectangle {
                 anchors.fill: parent
-                gradient: Gradient {
-                    orientation: Gradient.Horizontal
-                    GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 0.5; color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.22) }
-                    GradientStop { position: 1.0; color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.35) }
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.5; color: detailView._withAlpha(detailView._surfaceVariantColor(), 0.22) }
+                    GradientStop { position: 1.0; color: detailView._withAlpha(detailView._surfaceColor(), 0.35) }
                 }
             }
 
@@ -524,7 +589,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.3
+                height: 1; color: _outlineVariantColor(); opacity: 0.3
             }
         }
 
@@ -532,7 +597,7 @@ Item {
             Layout.fillWidth: true
             visible: detailView._seasonEntries().length > 1
             height: visible ? 92 : 0
-            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.72)
+            color: _withAlpha(_surfaceColor(), 0.72)
 
             Column {
                 anchors.fill: parent
@@ -569,16 +634,16 @@ Item {
                         height: 48
                         radius: 14
                         color: isCurrent
-                            ? Color.mPrimary
+                            ? detailView._primaryColor()
                             : (hovered
-                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
-                                : Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.82))
+                                ? detailView._withAlpha(detailView._primaryColor(), 0.18)
+                                : detailView._withAlpha(detailView._surfaceVariantColor(), 0.82))
                         border.width: 1
                         border.color: isCurrent
-                            ? Color.mPrimary
+                            ? detailView._primaryColor()
                             : (hovered
-                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.45)
-                                : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28))
+                                ? detailView._withAlpha(detailView._primaryColor(), 0.45)
+                                : detailView._withAlpha(detailView._primaryColor(), 0.28))
                         Behavior on color { ColorAnimation { duration: 140 } }
                         Behavior on border.color { ColorAnimation { duration: 140 } }
 
@@ -592,8 +657,8 @@ Item {
                                 font.pixelSize: 11
                                 font.bold: isCurrent
                                 color: isCurrent
-                                    ? Color.mOnPrimary
-                                    : (hovered ? Color.mPrimary : Color.mOnSurface)
+                                    ? detailView._onPrimaryColor()
+                                    : (hovered ? detailView._primaryColor() : Color.mOnSurface)
                                 elide: Text.ElideRight
                                 Behavior on color { ColorAnimation { duration: 140 } }
                             }
@@ -605,8 +670,8 @@ Item {
                                     : seasonMetaText
                                 font.pixelSize: 9
                                 color: isCurrent
-                                    ? Color.mOnPrimary
-                                    : (hovered ? Color.mPrimary : Color.mOnSurfaceVariant)
+                                    ? detailView._onPrimaryColor()
+                                    : (hovered ? detailView._primaryColor() : detailView._onSurfaceVariantColor())
                                 opacity: 0.8
                                 elide: Text.ElideRight
                                 Behavior on color { ColorAnimation { duration: 140 } }
@@ -641,7 +706,7 @@ Item {
 
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                height: 1; color: Color.mOutlineVariant; opacity: 0.25
+                height: 1; color: _outlineVariantColor(); opacity: 0.25
             }
         }
 
@@ -679,7 +744,7 @@ Item {
             // Fetching stream spinner
             Rectangle {
                 anchors.fill: parent
-                color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.68)
+                color: detailView._withAlpha(detailView._surfaceColor(), 0.68)
                 visible: anime?.isFetchingLinks ?? false; z: 6
 
                 Column {
@@ -706,7 +771,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.52)
+                color: detailView._withAlpha(detailView._surfaceColor(), 0.52)
                 visible: anime?.isLaunchingPlayer ?? false; z: 6
 
                 Column {
@@ -742,7 +807,7 @@ Item {
                 height: 36
                 radius: 18
                 width: Math.min(parent.width - 32, detailErrText.implicitWidth + 28)
-                color: Color.mErrorContainer
+                color: detailView._errorContainerColor()
                 visible: (anime?.detailError?.length ?? 0) > 0 && !(anime?.isFetchingDetail ?? false)
                 z: 7
 
@@ -755,7 +820,7 @@ Item {
                     }
                     text: anime?.detailError ?? ""
                     font.pixelSize: 11
-                    color: Color.mOnErrorContainer
+                    color: detailView._onErrorContainerColor()
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -769,7 +834,7 @@ Item {
                 }
                 height: 36; radius: 18
                 width: Math.min(parent.width - 32, linksErrText.implicitWidth + 28)
-                color: Color.mErrorContainer
+                color: detailView._errorContainerColor()
                 visible: (anime?.linksError?.length ?? 0) > 0 && !(anime?.isFetchingLinks ?? false)
                 z: 7
 
@@ -782,7 +847,7 @@ Item {
                     }
                     text: anime?.linksError ?? ""
                     font.pixelSize: 11
-                    color: Color.mOnErrorContainer
+                    color: detailView._onErrorContainerColor()
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -796,7 +861,7 @@ Item {
                 }
                 height: 36; radius: 18
                 width: Math.min(parent.width - 32, playbackErrText.implicitWidth + 28)
-                color: Color.mErrorContainer
+                color: detailView._errorContainerColor()
                 visible: (anime?.playbackError?.length ?? 0) > 0 && !(anime?.isLaunchingPlayer ?? false)
                 z: 7
 
@@ -809,7 +874,7 @@ Item {
                     }
                     text: anime?.playbackError ?? ""
                     font.pixelSize: 11
-                    color: Color.mOnErrorContainer
+                    color: detailView._onErrorContainerColor()
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -857,7 +922,7 @@ Item {
                         : 0
 
                     color: isLastWatched
-                        ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.07)
+                        ? detailView._withAlpha(detailView._primaryColor(), 0.07)
                         : (epRowArea.pressed
                             ? Color.mSurfaceVariant
                             : (epRowArea.containsMouse ? Color.mSurface : "transparent"))
@@ -870,7 +935,7 @@ Item {
                             left: parent.left; right: parent.right
                             leftMargin: 64; rightMargin: 56
                         }
-                        height: 1; color: Color.mOutlineVariant; opacity: 0.22
+                        height: 1; color: detailView._outlineVariantColor(); opacity: 0.22
                     }
 
                     Rectangle {
@@ -884,7 +949,7 @@ Item {
                         }
                         height: 3
                         radius: 2
-                        color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.18)
+                        color: detailView._withAlpha(detailView._outlineVariantColor(), 0.18)
                         visible: hasProgress && progressRatio > 0
 
                         Rectangle {
@@ -901,13 +966,13 @@ Item {
 
                         Rectangle {
                             width: epPillText.implicitWidth + 16; height: 26; radius: 13
-                            color: (isLastWatched || isWatched) ? Color.mPrimary : Color.mPrimaryContainer
+                            color: (isLastWatched || isWatched) ? Color.mPrimary : detailView._primaryContainerColor()
 
                             Text {
                                 id: epPillText; anchors.centerIn: parent
                                 text: "Ep." + (modelData.number || "?")
                                 font.pixelSize: 9; font.bold: true; font.letterSpacing: 0.5
-                                color: (isLastWatched || isWatched) ? Color.mOnPrimary : Color.mOnPrimaryContainer
+                                color: (isLastWatched || isWatched) ? Color.mOnPrimary : detailView._onPrimaryContainerColor()
                             }
                         }
 
@@ -921,8 +986,8 @@ Item {
                         Rectangle {
                             visible: hasProgress
                             width: 6; height: 6; radius: 3
-                            color: Color.mTertiary
-                            anchors.verticalCenter: parent.verticalCenter
+                            color: detailView._tertiaryColor()
+                            Layout.alignment: Qt.AlignVCenter
                             opacity: 0.9
                         }
 
@@ -931,10 +996,10 @@ Item {
                             font.pixelSize: isWatched ? 14 : 13
                             font.bold: isWatched
                             color: isWatched
-                                ? Color.mPrimary
+                                ? detailView._primaryColor()
                                 : hasProgress
-                                    ? Color.mTertiary
-                                    : (epRowArea.containsMouse ? Color.mPrimary : Color.mOutline)
+                                    ? detailView._tertiaryColor()
+                                    : (epRowArea.containsMouse ? detailView._primaryColor() : detailView._outlineColor())
                             opacity: isWatched ? 0.8
                                 : hasProgress ? 0.9
                                 : (epRowArea.containsMouse ? 0.9 : 0.35)
@@ -953,12 +1018,12 @@ Item {
                                 anchors.fill: parent
                                 radius: 14
                                 color: watchToggleArea.containsMouse
-                                    ? (isWatched ? Color.mPrimary : Color.mPrimaryContainer)
-                                    : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.7)
+                                    ? (isWatched ? detailView._primaryColor() : detailView._primaryContainerColor())
+                                    : detailView._withAlpha(detailView._surfaceColor(), 0.7)
                                 border.width: 1
                                 border.color: isWatched
-                                    ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.45)
-                                    : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.35)
+                                    ? detailView._withAlpha(detailView._primaryColor(), 0.45)
+                                    : detailView._withAlpha(detailView._outlineVariantColor(), 0.35)
                                 Behavior on color { ColorAnimation { duration: 130 } }
                                 Behavior on border.color { ColorAnimation { duration: 130 } }
                             }
@@ -969,8 +1034,8 @@ Item {
                                 font.pixelSize: isWatched ? 12 : 14
                                 font.bold: true
                                 color: isWatched
-                                    ? (watchToggleArea.containsMouse ? Color.mOnPrimary : Color.mPrimary)
-                                    : (watchToggleArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant)
+                                    ? (watchToggleArea.containsMouse ? detailView._onPrimaryColor() : detailView._primaryColor())
+                                    : (watchToggleArea.containsMouse ? detailView._onPrimaryContainerColor() : detailView._onSurfaceVariantColor())
                                 Behavior on color { ColorAnimation { duration: 130 } }
                             }
 

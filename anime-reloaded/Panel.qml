@@ -10,6 +10,11 @@ Item {
 
     property var pluginApi: null
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
     // ── SmartPanel contract ───────────────────────────────────────────────────
     readonly property var geometryPlaceholder: panelContainer
     readonly property bool allowAttach: true
@@ -198,7 +203,10 @@ Item {
                 // Top hairline
                 Rectangle {
                     anchors { top: parent.top; left: parent.left; right: parent.right }
-                    height: 1; color: Color.mOutlineVariant; opacity: 0.4
+                    height: 1
+                    color: _themeColor("mOutlineVariant",
+                        _themeColor("mOutline", Color.mOnSurfaceVariant))
+                    opacity: 0.4
                 }
 
                 Row {

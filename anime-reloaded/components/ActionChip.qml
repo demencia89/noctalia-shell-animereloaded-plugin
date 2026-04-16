@@ -17,18 +17,25 @@ Item {
     property bool boldLabel: true
     property real disabledOpacity: 0.45
 
+    function _themeColor(name, fallback) {
+        var value = Color ? Color[name] : null
+        return value !== undefined && value !== null ? value : fallback
+    }
+
     property color baseColor: Color.mSurface
-    property color hoverColor: Color.mPrimaryContainer
+    property color hoverColor: _themeColor("mPrimaryContainer",
+        Qt.tint(Color.mSurface, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)))
     property color activeColor: Color.mPrimary
     property color activeHoverColor: activeColor
 
-    property color baseBorderColor: Color.mOutlineVariant
+    property color baseBorderColor: _themeColor("mOutlineVariant",
+        _themeColor("mOutline", Color.mOnSurfaceVariant))
     property color hoverBorderColor: Color.mPrimary
     property color activeBorderColor: Color.mPrimary
     property color activeHoverBorderColor: activeBorderColor
 
     property color baseTextColor: Color.mOnSurfaceVariant
-    property color hoverTextColor: Color.mOnPrimaryContainer
+    property color hoverTextColor: _themeColor("mOnPrimaryContainer", Color.mPrimary)
     property color activeTextColor: Color.mOnPrimary
     property color activeHoverTextColor: activeTextColor
 
