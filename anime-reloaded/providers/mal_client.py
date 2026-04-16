@@ -70,8 +70,10 @@ def build_authorize_url(client_id, code_verifier, redirect_uri="", state=""):
 def _auth_header(client_id, client_secret):
     client_id = str(client_id or "").strip()
     client_secret = str(client_secret or "").strip()
-    if not client_id or not client_secret:
+    if not client_id:
         return ""
+    # MAL documents HTTP Basic auth for token requests, and explicitly notes that
+    # clients without a secret authenticate with an empty password.
     raw = f"{client_id}:{client_secret}".encode("utf-8")
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
@@ -92,8 +94,34 @@ def _token_request(client_id, client_secret, payload):
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        parsed = {}
+        try:
+            parsed = json.loads(body) if body else {}
+        except Exception:
+            parsed = {}
+
+        code = str(parsed.get("error") or parsed.get("code") or "").strip()
+        message = str(parsed.get("message") or parsed.get("error_description") or exc.reason or "").strip()
+
+        if exc.code == 401 and not str(client_secret or "").strip():
+            grant_type = str((payload or {}).get("grant_type") or "").strip()
+            if grant_type == "authorization_code":
+                message = (
+                    "The shared MyAnimeList app rejected the login exchange. "
+                    "Its MAL app registration likely is not configured for the public built-in login flow yet."
+                )
+            elif grant_type == "refresh_token":
+                message = (
+                    "The shared MyAnimeList app rejected the session refresh. "
+                    "Reconnect after the shared MAL app registration is fixed."
+                )
+
+        raise MalApiError(exc.code, code=code, message=message, body=body) from exc
 
 
 def exchange_code(client_id, client_secret, code, code_verifier, redirect_uri=""):

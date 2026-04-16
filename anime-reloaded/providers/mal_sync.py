@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.parse
 
+from . import mal_backend
 from . import mal_client
 from .anilist import AniListMetadataProvider
 from .anilist_client import gql
@@ -64,6 +65,11 @@ query($ids:[Int]){
 _ANILIST_PROVIDER = AniListMetadataProvider()
 _DEFAULT_MAL_CLIENT_ID = "831f9123c7e50037ce8c395ac713fff2"
 _DEFAULT_MAL_REDIRECT_URI = "http://127.0.0.1:8787/animereloaded"
+_LEGACY_DEFAULT_MAL_BACKEND_URLS = {
+    "https://auth.bogglemind.top",
+    "https://auth.bogglemind.top:8443",
+}
+_DEFAULT_MAL_BACKEND_URL = "https://dns.bogglemind.top:8443"
 _LEGACY_LOCAL_REDIRECT_URIS = {
     "https://localhost:8787/animereloaded",
     "https://127.0.0.1:8787/animereloaded",
@@ -76,12 +82,16 @@ def _normalise_config(raw):
     config = dict(raw or {})
     config["enabled"] = config.get("enabled") is True
     config["autoPush"] = config.get("autoPush") is True
-    config["clientId"] = str(config.get("clientId") or _DEFAULT_MAL_CLIENT_ID).strip()
-    config["clientSecret"] = str(config.get("clientSecret") or "").strip()
-    redirect_uri = str(config.get("redirectUri") or "").strip()
-    if not redirect_uri or redirect_uri in _LEGACY_LOCAL_REDIRECT_URIS:
-        redirect_uri = _DEFAULT_MAL_REDIRECT_URI
-    config["redirectUri"] = redirect_uri
+    # Keep the release path simple: optional backend bridge, otherwise fixed local PKCE defaults.
+    config["clientId"] = _DEFAULT_MAL_CLIENT_ID
+    config["clientSecret"] = ""
+    config["redirectUri"] = _DEFAULT_MAL_REDIRECT_URI
+    backend_url = str(config.get("backendUrl") or "").strip().rstrip("/")
+    if not backend_url or backend_url in _LEGACY_DEFAULT_MAL_BACKEND_URLS:
+        backend_url = _DEFAULT_MAL_BACKEND_URL
+    config["backendUrl"] = backend_url
+    config["backendAuthSessionId"] = str(config.get("backendAuthSessionId") or "").strip()
+    config["backendSessionToken"] = str(config.get("backendSessionToken") or "").strip()
     config["codeVerifier"] = str(config.get("codeVerifier") or "").strip()
     config["authState"] = str(config.get("authState") or "").strip()
     config["authUrl"] = str(config.get("authUrl") or "").strip()
@@ -108,6 +118,26 @@ def _apply_token_payload(config, token_payload):
     return config
 
 
+def _apply_backend_token_payload(config, token_payload):
+    config = _normalise_config(config)
+    payload = token_payload or {}
+    config["accessToken"] = str(payload.get("accessToken") or payload.get("access_token") or "").strip()
+    config["refreshToken"] = ""
+    config["tokenType"] = str(payload.get("tokenType") or payload.get("token_type") or "Bearer").strip() or "Bearer"
+    expires_at = int(payload.get("expiresAt") or 0)
+    if expires_at <= 0:
+        config["expiresAt"] = mal_client.token_expiry_timestamp({
+            "expires_in": int(payload.get("expiresIn") or payload.get("expires_in") or 0),
+        })
+    else:
+        config["expiresAt"] = expires_at
+    return config
+
+
+def _using_backend(config):
+    return bool(str((config or {}).get("backendUrl") or "").strip())
+
+
 def _update_user_profile(config):
     me = mal_client.get_me(config.get("accessToken"))
     config["userName"] = str(me.get("name") or config.get("userName") or "").strip()
@@ -119,11 +149,21 @@ def _ensure_access_token(config):
     config = _normalise_config(config)
     access_token = config.get("accessToken") or ""
     refresh_token = config.get("refreshToken") or ""
+    backend_session_token = config.get("backendSessionToken") or ""
     expires_at = int(config.get("expiresAt") or 0)
     now_ts = int(time.time())
 
     if access_token and (expires_at <= 0 or expires_at > (now_ts + 90)):
         return config
+
+    if _using_backend(config):
+        if not backend_session_token:
+            raise RuntimeError("MyAnimeList backend session is missing. Connect the account first.")
+        token_payload = mal_backend.refresh_session(
+            config.get("backendUrl"),
+            backend_session_token,
+        )
+        return _apply_backend_token_payload(config, token_payload)
 
     if not refresh_token:
         raise RuntimeError("MyAnimeList access token is missing. Connect the account first.")
@@ -156,6 +196,19 @@ def _authorised_call(config, fn):
 
 def build_auth_url(config):
     config = _normalise_config(config)
+    if _using_backend(config):
+        payload = mal_backend.start_auth(config.get("backendUrl"))
+        config["backendAuthSessionId"] = str(payload.get("authSessionId") or "").strip()
+        config["codeVerifier"] = ""
+        config["authState"] = ""
+        config["authUrl"] = str(payload.get("authUrl") or "").strip()
+        if not config["backendAuthSessionId"] or not config["authUrl"]:
+            raise RuntimeError("The MyAnimeList backend did not return a valid browser login session.")
+        return {
+            "config": config,
+            "authUrl": config["authUrl"],
+        }
+
     verifier = mal_client.generate_code_verifier()
     state = mal_client.generate_state()
     config["codeVerifier"] = verifier
@@ -175,6 +228,8 @@ def build_auth_url(config):
 
 def exchange_code(config, code):
     config = _normalise_config(config)
+    if _using_backend(config):
+        raise RuntimeError("Manual MyAnimeList code exchange is disabled while a backend auth bridge is configured.")
     if not config.get("codeVerifier"):
         raise RuntimeError("Start MyAnimeList auth first so a code verifier is available.")
     token_payload = mal_client.exchange_code(
@@ -212,6 +267,38 @@ def _validate_loopback_redirect(redirect_uri):
 
 def await_browser_login(config, timeout_seconds=_BROWSER_AUTH_TIMEOUT_SECONDS):
     config = _normalise_config(config)
+    if _using_backend(config):
+        session_id = str(config.get("backendAuthSessionId") or "").strip()
+        if not session_id:
+            raise RuntimeError("Start MyAnimeList auth first so a backend browser session is available.")
+        payload = mal_backend.await_auth_session(
+            config.get("backendUrl"),
+            session_id,
+            timeout_seconds=timeout_seconds,
+        )
+        config = _apply_backend_token_payload(config, payload)
+        backend_session_token = str(payload.get("sessionToken") or "").strip()
+        if not backend_session_token:
+            raise RuntimeError("MyAnimeList backend login did not return a usable session token.")
+        if not config.get("accessToken"):
+            raise RuntimeError("MyAnimeList backend login did not return a usable access token.")
+        config["enabled"] = True
+        config["backendAuthSessionId"] = ""
+        config["backendSessionToken"] = backend_session_token
+        config["codeVerifier"] = ""
+        config["authState"] = ""
+        config["authUrl"] = ""
+        user = payload.get("user") or {}
+        config["userName"] = str(user.get("name") or config.get("userName") or "").strip()
+        config["userPicture"] = str(user.get("picture") or config.get("userPicture") or "").strip()
+        return {
+            "config": config,
+            "user": {
+                "name": config["userName"],
+                "picture": config["userPicture"],
+            },
+        }
+
     redirect_uri = config.get("redirectUri") or ""
     parsed = _validate_loopback_redirect(redirect_uri)
     expected_path = parsed.path or "/"

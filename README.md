@@ -88,12 +88,19 @@ AnimeReloaded keeps AniList as the canonical in-app metadata source and uses MyA
 
 Current MAL sync behavior:
 
-- browser auth with localhost callback capture from Settings
+- browser auth through the deployed AnimeReloaded MAL backend
 - `Pull From MAL` to merge external progress and import MAL-only titles that resolve confidently to AniList
 - `Push To MAL` to send both local status and watched-episode progress outward
 - optional auto-push after local watch changes
 - per-show MAL badges in Library and Detail
 - sync overview focused on titles needing attention, ready-to-push titles, and recently synced titles
+- normal users do not need to create MAL API keys for the default login flow
+
+Current deployed default:
+
+- backend base URL: `https://dns.bogglemind.top:8443`
+- backend callback URL: `https://dns.bogglemind.top:8443/api/v1/mal/auth/callback`
+- Pi deployment shape: backend on loopback `127.0.0.1:18787`, local TLS proxy on public `8443`
 
 Status handling now follows MAL-style rules closely:
 
@@ -136,6 +143,7 @@ The root manifest keeps local checkouts loadable, while the actual plugin runtim
 ## Requirements
 
 - `python3` in `$PATH`
+- `python3-cryptography` (or equivalent Python `cryptography` package) available to the plugin runtime
 - `mpv` in `$PATH`
 - network access to AniList, AllAnime, MyAnimeList, and resolved stream hosts
 

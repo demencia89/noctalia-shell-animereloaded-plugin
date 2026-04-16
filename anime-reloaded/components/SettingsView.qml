@@ -727,7 +727,7 @@ Item {
 
                                     Text {
                                         width: settingsScroll.availableWidth - 80
-                                        text: "Keep AniList as the in-app metadata source and use MyAnimeList only for account sync. Regular login now happens in the browser and returns automatically to AnimeReloaded through a localhost callback."
+                                        text: "Keep AniList as the in-app metadata source and use MyAnimeList only for account sync. Regular login happens in the browser and AnimeReloaded finishes the connection automatically."
                                         wrapMode: Text.Wrap
                                         lineHeight: 1.35
                                         font.pixelSize: 11
@@ -1030,6 +1030,28 @@ Item {
                                 spacing: 8
 
                                 Text {
+                                    text: "Backend URL"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                SettingTextField {
+                                    width: parent.width
+                                    value: anime?.malSync?.backendUrl || ""
+                                    placeholderText: "Optional shared MAL auth bridge URL"
+                                    onTextEdited: function(text) {
+                                        if (anime) anime.setMalSyncField("backendUrl", text)
+                                    }
+                                }
+                            }
+
+                            Column {
+                                visible: settingsView.showMalAdvancedControls
+                                    && (anime?.malSyncShowAdvanced ?? false)
+                                spacing: 8
+
+                                Text {
                                     text: "Client ID"
                                     font.pixelSize: 11
                                     font.bold: true
@@ -1209,7 +1231,7 @@ Item {
 
                             Text {
                                 width: parent.width
-                                text: "Flow: click Connect MAL, approve access in the browser, then AnimeReloaded captures the callback automatically. Pull merges progress and can import MAL-only titles that resolve to AniList. Push sends AnimeReloaded progress back out."
+                                text: "Flow: click Connect MAL, approve access in the browser, then AnimeReloaded finishes the session automatically. Pull merges progress and can import MAL-only titles that resolve to AniList. Push sends AnimeReloaded progress back out."
                                 wrapMode: Text.Wrap
                                 lineHeight: 1.35
                                 font.pixelSize: 11

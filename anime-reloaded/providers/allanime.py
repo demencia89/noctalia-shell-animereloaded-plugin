@@ -6,8 +6,12 @@ import re
 import time
 import urllib.error
 import urllib.request
+from base64 import b64decode
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .contracts import MetadataProvider, StreamProvider
 
@@ -54,6 +58,20 @@ def _decode_url(encoded):
     return "".join(_HEX.get(pair, pair) for pair in pairs).replace("/clock", "/clock.json")
 
 
+def _decode_tobeparsed_payload(payload):
+    text = str(payload or "").strip()
+    if not text:
+        return None
+
+    raw = b64decode(text)
+    iv = raw[:12]
+    encrypted = raw[12:]
+    secret = "P7K2RGbFgauVtmiS"[::-1].encode("utf-8")
+    key = sha256(secret).digest()
+    decrypted = AESGCM(key).decrypt(iv, encrypted, None)
+    return json.loads(decrypted.decode("utf-8"))
+
+
 def _gql(variables, query):
     body = json.dumps({"variables": variables, "query": query}, separators=(",", ":")).encode()
     req = urllib.request.Request(
@@ -66,7 +84,15 @@ def _gql(variables, query):
         },
     )
     with urllib.request.urlopen(req, timeout=15) as response:
-        return json.loads(response.read().decode())
+        parsed = json.loads(response.read().decode())
+
+    data = parsed.get("data")
+    if isinstance(data, dict) and isinstance(data.get("tobeparsed"), str):
+        decoded = _decode_tobeparsed_payload(data.get("tobeparsed"))
+        if decoded is not None:
+            parsed["data"] = decoded
+    return parsed
+
 
 
 def _fetch(url):
@@ -706,4 +732,3 @@ class AllAnimeStreamProvider(StreamProvider):
             "code": "no_playable_stream",
             "providerFailures": provider_failures,
         }
-

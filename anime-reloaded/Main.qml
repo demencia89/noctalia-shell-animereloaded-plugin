@@ -8,6 +8,12 @@ import "MalStatus.js" as MalStatus
 Item {
     id: root
 
+    readonly property string defaultMalBackendUrl: "https://dns.bogglemind.top:8443"
+    readonly property var legacyMalBackendUrls: ([
+        "https://auth.bogglemind.top",
+        "https://auth.bogglemind.top:8443"
+    ])
+
     property var pluginApi: null
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
@@ -147,6 +153,9 @@ Item {
             clientId: "831f9123c7e50037ce8c395ac713fff2",
             clientSecret: "",
             redirectUri: "http://127.0.0.1:8787/animereloaded",
+            backendUrl: defaultMalBackendUrl,
+            backendAuthSessionId: "",
+            backendSessionToken: "",
             codeVerifier: "",
             authState: "",
             authUrl: "",
@@ -168,9 +177,16 @@ Item {
         config.version = 1
         config.enabled = config.enabled === true
         config.autoPush = config.autoPush === true
-        config.clientId = String(config.clientId || "831f9123c7e50037ce8c395ac713fff2")
-        config.clientSecret = String(config.clientSecret || "")
-        config.redirectUri = String(config.redirectUri || "http://127.0.0.1:8787/animereloaded")
+        // MAL sync supports either a backend auth bridge or the legacy local PKCE flow.
+        config.clientId = "831f9123c7e50037ce8c395ac713fff2"
+        config.clientSecret = ""
+        config.redirectUri = "http://127.0.0.1:8787/animereloaded"
+        var backendUrl = String(config.backendUrl || "").trim().replace(/\/+$/, "")
+        if (backendUrl.length === 0 || legacyMalBackendUrls.indexOf(backendUrl) >= 0)
+            backendUrl = defaultMalBackendUrl
+        config.backendUrl = backendUrl
+        config.backendAuthSessionId = String(config.backendAuthSessionId || "")
+        config.backendSessionToken = String(config.backendSessionToken || "")
         config.codeVerifier = String(config.codeVerifier || "")
         config.authState = String(config.authState || "")
         config.authUrl = String(config.authUrl || "")
@@ -227,6 +243,11 @@ Item {
         malAutoPushTimer.stop()
         var next = _normaliseMalSync(malSync)
         next.enabled = false
+        next.clientId = "831f9123c7e50037ce8c395ac713fff2"
+        next.clientSecret = ""
+        next.redirectUri = "http://127.0.0.1:8787/animereloaded"
+        next.backendAuthSessionId = ""
+        next.backendSessionToken = ""
         next.codeVerifier = ""
         next.authState = ""
         next.authUrl = ""

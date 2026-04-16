@@ -331,13 +331,15 @@ Item {
         // ── Episode count / last watched sub-bar ──────────────────────────────
         Rectangle {
             Layout.fillWidth: true
-            height: Math.max(34, detailMetaFlow.implicitHeight + 16)
+            readonly property real metaContentHeight:
+                Math.max(detailMetaFlow.childrenRect.height, detailMetaFlow.implicitHeight)
+            height: Math.max(30, metaContentHeight + 10)
             color: "transparent"
             visible: anime?.currentAnime != null
 
             Item {
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: 5
                 anchors.leftMargin: 16
                 anchors.rightMargin: 16
 
@@ -374,7 +376,7 @@ Item {
                         left: parent.left
                         right: parent.right
                         top: parent.top
-                        topMargin: 2
+                        topMargin: 0
                     }
                     spacing: 8
 
