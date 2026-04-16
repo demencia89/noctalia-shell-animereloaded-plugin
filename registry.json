@@ -4,11 +4,11 @@
     {
       "id": "anime-reloaded",
       "name": "AnimeReloaded",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "official": false,
       "author": "demencia89",
       "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
-      "repository": "https://github.com/demencia89/noctalia-shell-plugin-animereloaded.git",
+      "repository": "https://github.com/demencia89/noctalia-shell-animereloaded-plugin.git",
       "minNoctaliaVersion": "3.6.0",
       "license": "MIT",
       "tags": [

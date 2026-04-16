@@ -16,7 +16,7 @@ It now runs as a hybrid provider plugin:
 - Current metadata provider: `anilist`
 - Current stream provider: `allanime`
 - Current playback path: Noctalia QML -> `provider_cli.py` -> AniList metadata -> AllAnime stream resolver -> `mpv`
-- Intended repository name: `noctalia-shell-plugin-animereloaded`
+- Intended repository name: `noctalia-shell-animereloaded-plugin`
 - Current version: `2.2.0`
 
 ## Why This Repo Exists
