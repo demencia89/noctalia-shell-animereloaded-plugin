@@ -427,9 +427,9 @@ def _feed_tracking_state(entry, latest_released, next_episode):
 
 def _season_entry_from_media(media, relation_type=""):
     title = media.get("title") or {}
+    mal_id = str(media.get("idMal") or "")
     item = {
         "id": str(media.get("id") or ""),
-        "malId": str(media.get("idMal") or ""),
         "relationType": relation_type,
         "name": title.get("romaji") or title.get("english") or title.get("native") or "",
         "englishName": title.get("english") or title.get("romaji") or title.get("native") or "",
@@ -445,10 +445,10 @@ def _season_entry_from_media(media, relation_type=""):
             "id": item["id"],
         }
     }
-    if item["malId"]:
+    if mal_id:
         refs["sync"] = {
             "provider": "myanimelist",
-            "id": item["malId"],
+            "id": mal_id,
         }
     item["providerRefs"] = refs
     return item
@@ -524,7 +524,6 @@ class AniListMetadataProvider(MetadataProvider):
             }
         return {
             "id": str(media.get("id") or ""),
-            "malId": mal_id,
             "name": title.get("romaji") or title.get("english") or title.get("native") or "",
             "englishName": title.get("english") or title.get("romaji") or title.get("native") or "",
             "nativeName": title.get("native") or "",

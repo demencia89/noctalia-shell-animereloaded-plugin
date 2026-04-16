@@ -31,7 +31,9 @@ Library panel:
 - Library status chips support multi-select filtering, and local status handling now stays aligned with MAL sync semantics.
 - Feed tracks releasing seasons you are actively watching and close to current on, then surfaces new episodes when they become relevant.
 - Detail and library progress actions support catching up or marking fully watched when appropriate.
-- MyAnimeList sync supports browser login, refresh, pull, push, optional auto-push, per-title sync badges, and MAL-aligned status/progress payloads.
+- Startup includes a schema-versioned library migration that normalises legacy metadata refs and promotes legacy `malId` values into `providerRefs.sync`.
+- Settings now include runtime self-checks plus a one-click playback mapping repair pass for unresolved library entries.
+- MyAnimeList sync supports browser login, pull, push, optional auto-push, per-title sync badges, and MAL-aligned status/progress payloads.
 
 ## Feed Direction
 
@@ -54,12 +56,13 @@ AnimeReloaded keeps AniList as the canonical in-app metadata source and uses MyA
 
 Current MAL sync behavior:
 
-- browser auth through the deployed AnimeReloaded MAL backend
+- browser auth through the deployed AnimeReloaded MAL backend only
 - `Pull From MAL` to merge external progress and import MAL-only titles that resolve confidently to AniList
 - `Push To MAL` to send both local status and watched-episode progress outward
 - optional auto-push after local watch changes
 - per-show MAL badges in Library and Detail
 - sync overview focused on titles needing attention, ready-to-push titles, and recently synced titles
+- stale legacy OAuth override fields are no longer part of the shipped settings model
 
 
 Status handling now follows MAL-style rules closely:
@@ -105,6 +108,8 @@ The root manifest keeps local checkouts loadable, while the actual plugin runtim
 - `mpv` in `$PATH`
 - network access to AniList, AllAnime, MyAnimeList, and resolved stream hosts
 
+The Settings view includes a runtime self-test that checks the local Python/mpv/cryptography stack and MAL backend reachability.
+
 ## Local Runtime Files
 
 AnimeReloaded stores local runtime data in the plugin directory with `anime-reloaded-*` names, including:
@@ -114,14 +119,19 @@ AnimeReloaded stores local runtime data in the plugin directory with `anime-relo
 - `anime-reloaded-provider-map.json`
 - `anime-reloaded-mal-config.json`
 
-`anime-reloaded-mal-config.json` contains local MAL auth/session data and should remain untracked.
+`anime-reloaded-mal-config.json` contains local MAL backend session data and should remain untracked.
 
 ## Current Limitations
 
-- Playback still depends on a valid AniList -> AllAnime mapping.
-- Some imported MAL titles may sync correctly but still need a resolvable AllAnime mapping before playback works.
-- Feed is already airing-aware and progression-aware, but it is still a pragmatic release alert list rather than a full notification platform.
-- Legacy library/feed compatibility exists, but not every old entry is migrated in-place automatically.
+- Playback still depends on a resolvable AniList `->` AllAnime mapping. The built-in repair pass reduces manual cleanup, but it cannot invent mappings that neither provider exposes.
+- MAL pull only imports titles that map confidently back to AniList. Ambiguous or missing cross-service mappings are skipped instead of guessed.
+- Feed is intentionally a release-aware watchlist, not a full notification system with history, dismissal rules, or background delivery.
+- Runtime Health validates local prerequisites and MAL backend reachability, but it is still a lightweight startup self-test rather than an end-to-end provider integration test.
+
+## Release Checklist
+
+The manual release checklist lives in `docs/release-checklist.md`.
+
 
 ## Related Links
 

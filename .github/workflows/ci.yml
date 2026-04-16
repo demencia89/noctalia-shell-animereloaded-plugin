@@ -1,0 +1,48 @@
+name: Validate Plugin
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools python3-cryptography
+
+      - name: Validate JSON manifests
+        run: |
+          python3 -m json.tool manifest.json >/dev/null
+          python3 -m json.tool anime-reloaded/manifest.json >/dev/null
+          python3 -m json.tool registry.json >/dev/null
+
+      - name: Compile Python sources
+        run: python3 -m compileall anime-reloaded backend
+
+      - name: Verify registry output is current
+        run: |
+          node .github/workflows/update-registry.js
+          git diff --exit-code -- registry.json
+
+      - name: Lint QML entry points
+        run: qmllint -I anime-reloaded -I anime-reloaded/components anime-reloaded/Main.qml anime-reloaded/components/SettingsView.qml

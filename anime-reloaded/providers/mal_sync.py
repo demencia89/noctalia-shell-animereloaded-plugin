@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import http.server
-import socketserver
 import time
 import urllib.error
-import urllib.parse
 
 from . import mal_backend
 from . import mal_client
@@ -63,66 +60,45 @@ query($ids:[Int]){
 }
 """.strip()
 _ANILIST_PROVIDER = AniListMetadataProvider()
-_DEFAULT_MAL_CLIENT_ID = "831f9123c7e50037ce8c395ac713fff2"
-_DEFAULT_MAL_REDIRECT_URI = "http://127.0.0.1:8787/animereloaded"
 _LEGACY_DEFAULT_MAL_BACKEND_URLS = {
     "https://auth.bogglemind.top",
     "https://auth.bogglemind.top:8443",
 }
 _DEFAULT_MAL_BACKEND_URL = "https://dns.bogglemind.top:8443"
-_LEGACY_LOCAL_REDIRECT_URIS = {
-    "https://localhost:8787/animereloaded",
-    "https://127.0.0.1:8787/animereloaded",
-    "http://localhost:8787/animereloaded",
-}
 _BROWSER_AUTH_TIMEOUT_SECONDS = 240
 
 
 def _normalise_config(raw):
-    config = dict(raw or {})
-    config["enabled"] = config.get("enabled") is True
-    config["autoPush"] = config.get("autoPush") is True
-    # Keep the release path simple: optional backend bridge, otherwise fixed local PKCE defaults.
-    config["clientId"] = _DEFAULT_MAL_CLIENT_ID
-    config["clientSecret"] = ""
-    config["redirectUri"] = _DEFAULT_MAL_REDIRECT_URI
-    backend_url = str(config.get("backendUrl") or "").strip().rstrip("/")
+    source = dict(raw or {})
+    config = {
+        "version": 2,
+        "enabled": source.get("enabled") is True,
+        "autoPush": source.get("autoPush") is True,
+        "backendUrl": "",
+        "backendAuthSessionId": "",
+        "backendSessionToken": "",
+        "userName": "",
+        "userPicture": "",
+        "lastSyncAt": 0,
+        "lastSyncDirection": "",
+    }
+    backend_url = str(source.get("backendUrl") or "").strip().rstrip("/")
     if not backend_url or backend_url in _LEGACY_DEFAULT_MAL_BACKEND_URLS:
         backend_url = _DEFAULT_MAL_BACKEND_URL
     config["backendUrl"] = backend_url
-    config["backendAuthSessionId"] = str(config.get("backendAuthSessionId") or "").strip()
-    config["backendSessionToken"] = str(config.get("backendSessionToken") or "").strip()
-    config["codeVerifier"] = str(config.get("codeVerifier") or "").strip()
-    config["authState"] = str(config.get("authState") or "").strip()
-    config["authUrl"] = str(config.get("authUrl") or "").strip()
-    config["accessToken"] = str(config.get("accessToken") or "").strip()
-    config["refreshToken"] = str(config.get("refreshToken") or "").strip()
-    config["tokenType"] = str(config.get("tokenType") or "Bearer").strip() or "Bearer"
-    config["expiresAt"] = int(config.get("expiresAt") or 0)
-    config["userName"] = str(config.get("userName") or "").strip()
-    config["userPicture"] = str(config.get("userPicture") or "").strip()
-    config["lastSyncAt"] = int(config.get("lastSyncAt") or 0)
-    config["lastSyncDirection"] = str(config.get("lastSyncDirection") or "").strip()
-    return config
-
-
-def _apply_token_payload(config, token_payload):
-    config = _normalise_config(config)
-    payload = token_payload or {}
-    config["accessToken"] = str(payload.get("access_token") or "").strip()
-    refresh_token = str(payload.get("refresh_token") or "").strip()
-    if refresh_token:
-        config["refreshToken"] = refresh_token
-    config["tokenType"] = str(payload.get("token_type") or "Bearer").strip() or "Bearer"
-    config["expiresAt"] = mal_client.token_expiry_timestamp(payload)
+    config["backendAuthSessionId"] = str(source.get("backendAuthSessionId") or "").strip()
+    config["backendSessionToken"] = str(source.get("backendSessionToken") or "").strip()
+    config["userName"] = str(source.get("userName") or "").strip()
+    config["userPicture"] = str(source.get("userPicture") or "").strip()
+    config["lastSyncAt"] = int(source.get("lastSyncAt") or 0)
+    config["lastSyncDirection"] = str(source.get("lastSyncDirection") or "").strip()
     return config
 
 
 def _apply_backend_token_payload(config, token_payload):
-    config = _normalise_config(config)
+    config = dict(_normalise_config(config))
     payload = token_payload or {}
     config["accessToken"] = str(payload.get("accessToken") or payload.get("access_token") or "").strip()
-    config["refreshToken"] = ""
     config["tokenType"] = str(payload.get("tokenType") or payload.get("token_type") or "Bearer").strip() or "Bearer"
     expires_at = int(payload.get("expiresAt") or 0)
     if expires_at <= 0:
@@ -132,6 +108,10 @@ def _apply_backend_token_payload(config, token_payload):
     else:
         config["expiresAt"] = expires_at
     return config
+
+
+def _config_for_save(config):
+    return _normalise_config(config)
 
 
 def _using_backend(config):
@@ -148,7 +128,6 @@ def _update_user_profile(config):
 def _ensure_access_token(config):
     config = _normalise_config(config)
     access_token = config.get("accessToken") or ""
-    refresh_token = config.get("refreshToken") or ""
     backend_session_token = config.get("backendSessionToken") or ""
     expires_at = int(config.get("expiresAt") or 0)
     now_ts = int(time.time())
@@ -156,24 +135,15 @@ def _ensure_access_token(config):
     if access_token and (expires_at <= 0 or expires_at > (now_ts + 90)):
         return config
 
-    if _using_backend(config):
-        if not backend_session_token:
-            raise RuntimeError("MyAnimeList backend session is missing. Connect the account first.")
-        token_payload = mal_backend.refresh_session(
-            config.get("backendUrl"),
-            backend_session_token,
-        )
-        return _apply_backend_token_payload(config, token_payload)
-
-    if not refresh_token:
-        raise RuntimeError("MyAnimeList access token is missing. Connect the account first.")
-
-    token_payload = mal_client.refresh_access_token(
-        config.get("clientId"),
-        config.get("clientSecret"),
-        refresh_token,
+    if not _using_backend(config):
+        raise RuntimeError("MyAnimeList backend URL is not configured.")
+    if not backend_session_token:
+        raise RuntimeError("MyAnimeList backend session is missing. Connect the account first.")
+    token_payload = mal_backend.refresh_session(
+        config.get("backendUrl"),
+        backend_session_token,
     )
-    return _apply_token_payload(config, token_payload)
+    return _apply_backend_token_payload(config, token_payload)
 
 
 def _authorised_call(config, fn):
@@ -181,213 +151,66 @@ def _authorised_call(config, fn):
     try:
         return config, fn(config)
     except urllib.error.HTTPError as exc:
-        if exc.code != 401 or not config.get("refreshToken"):
+        if exc.code != 401 or not config.get("backendSessionToken"):
             raise
-    config = _apply_token_payload(
-        config,
-        mal_client.refresh_access_token(
-            config.get("clientId"),
-            config.get("clientSecret"),
-            config.get("refreshToken"),
-        ),
+    config = _ensure_access_token(
+        dict(config, accessToken="", tokenType="", expiresAt=0),
     )
     return config, fn(config)
 
 
 def build_auth_url(config):
     config = _normalise_config(config)
-    if _using_backend(config):
-        payload = mal_backend.start_auth(config.get("backendUrl"))
-        config["backendAuthSessionId"] = str(payload.get("authSessionId") or "").strip()
-        config["codeVerifier"] = ""
-        config["authState"] = ""
-        config["authUrl"] = str(payload.get("authUrl") or "").strip()
-        if not config["backendAuthSessionId"] or not config["authUrl"]:
-            raise RuntimeError("The MyAnimeList backend did not return a valid browser login session.")
-        return {
-            "config": config,
-            "authUrl": config["authUrl"],
-        }
-
-    verifier = mal_client.generate_code_verifier()
-    state = mal_client.generate_state()
-    config["codeVerifier"] = verifier
-    config["authState"] = state
-    config["authUrl"] = mal_client.build_authorize_url(
-        config.get("clientId"),
-        verifier,
-        config.get("redirectUri"),
-        state,
-    )
+    if not _using_backend(config):
+        raise RuntimeError("MyAnimeList backend URL is not configured.")
+    payload = mal_backend.start_auth(config.get("backendUrl"))
+    auth_session_id = str(payload.get("authSessionId") or "").strip()
+    auth_url = str(payload.get("authUrl") or "").strip()
+    if not auth_session_id or not auth_url:
+        raise RuntimeError("The MyAnimeList backend did not return a valid browser login session.")
+    config["backendAuthSessionId"] = auth_session_id
     return {
-        "config": config,
-        "authUrl": config["authUrl"],
-        "codeVerifier": verifier,
+        "config": _config_for_save(config),
+        "authUrl": auth_url,
     }
-
-
-def exchange_code(config, code):
-    config = _normalise_config(config)
-    if _using_backend(config):
-        raise RuntimeError("Manual MyAnimeList code exchange is disabled while a backend auth bridge is configured.")
-    if not config.get("codeVerifier"):
-        raise RuntimeError("Start MyAnimeList auth first so a code verifier is available.")
-    token_payload = mal_client.exchange_code(
-        config.get("clientId"),
-        config.get("clientSecret"),
-        code,
-        config.get("codeVerifier"),
-        config.get("redirectUri"),
-    )
-    config = _apply_token_payload(config, token_payload)
-    config["enabled"] = True
-    config["codeVerifier"] = ""
-    config["authState"] = ""
-    config["authUrl"] = ""
-    me = _update_user_profile(config)
-    return {
-        "config": config,
-        "user": {
-            "name": str(me.get("name") or ""),
-            "picture": str(me.get("picture") or ""),
-        },
-    }
-
-
-def _validate_loopback_redirect(redirect_uri):
-    parsed = urllib.parse.urlparse(str(redirect_uri or "").strip())
-    if parsed.scheme != "http":
-        raise RuntimeError("MyAnimeList browser login requires an http://127.0.0.1 loopback redirect URI.")
-    if parsed.hostname not in ("127.0.0.1", "localhost"):
-        raise RuntimeError("MyAnimeList browser login requires a localhost loopback redirect URI.")
-    if not parsed.port:
-        raise RuntimeError("The MyAnimeList redirect URI must include an explicit localhost port.")
-    return parsed
 
 
 def await_browser_login(config, timeout_seconds=_BROWSER_AUTH_TIMEOUT_SECONDS):
     config = _normalise_config(config)
-    if _using_backend(config):
-        session_id = str(config.get("backendAuthSessionId") or "").strip()
-        if not session_id:
-            raise RuntimeError("Start MyAnimeList auth first so a backend browser session is available.")
-        payload = mal_backend.await_auth_session(
-            config.get("backendUrl"),
-            session_id,
-            timeout_seconds=timeout_seconds,
-        )
-        config = _apply_backend_token_payload(config, payload)
-        backend_session_token = str(payload.get("sessionToken") or "").strip()
-        if not backend_session_token:
-            raise RuntimeError("MyAnimeList backend login did not return a usable session token.")
-        if not config.get("accessToken"):
-            raise RuntimeError("MyAnimeList backend login did not return a usable access token.")
-        config["enabled"] = True
-        config["backendAuthSessionId"] = ""
-        config["backendSessionToken"] = backend_session_token
-        config["codeVerifier"] = ""
-        config["authState"] = ""
-        config["authUrl"] = ""
-        user = payload.get("user") or {}
-        config["userName"] = str(user.get("name") or config.get("userName") or "").strip()
-        config["userPicture"] = str(user.get("picture") or config.get("userPicture") or "").strip()
-        return {
-            "config": config,
-            "user": {
-                "name": config["userName"],
-                "picture": config["userPicture"],
-            },
-        }
-
-    redirect_uri = config.get("redirectUri") or ""
-    parsed = _validate_loopback_redirect(redirect_uri)
-    expected_path = parsed.path or "/"
-    expected_state = str(config.get("authState") or "").strip()
-    if not config.get("codeVerifier"):
-        raise RuntimeError("Start MyAnimeList auth first so a PKCE code verifier is available.")
-    if not expected_state:
-        raise RuntimeError("Start MyAnimeList auth first so an OAuth state token is available.")
-
-    port = int(parsed.port)
-    host = parsed.hostname or "127.0.0.1"
-    timeout_at = time.time() + max(15, int(timeout_seconds or _BROWSER_AUTH_TIMEOUT_SECONDS))
-    result = {"code": "", "state": "", "error": "", "error_description": ""}
-
-    class _ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-        daemon_threads = True
-        allow_reuse_address = True
-
-    class _CallbackHandler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            request_url = urllib.parse.urlparse(self.path)
-            if request_url.path != expected_path:
-                self.send_error(404)
-                return
-
-            params = urllib.parse.parse_qs(request_url.query or "", keep_blank_values=True)
-            result["code"] = str((params.get("code") or [""])[0] or "").strip()
-            result["state"] = str((params.get("state") or [""])[0] or "").strip()
-            result["error"] = str((params.get("error") or [""])[0] or "").strip()
-            result["error_description"] = str((params.get("error_description") or [""])[0] or "").strip()
-
-            is_ok = bool(result["code"]) and result["state"] == expected_state and not result["error"]
-            title = "AnimeReloaded Connected" if is_ok else "AnimeReloaded Login Failed"
-            message = (
-                "MyAnimeList is now connected. You can close this window."
-                if is_ok else
-                "AnimeReloaded could not finish the MyAnimeList login. You can close this window and try again."
-            )
-            body = (
-                "<!doctype html><html><head><meta charset='utf-8'>"
-                f"<title>{title}</title>"
-                "<style>"
-                "body{font-family:system-ui,sans-serif;background:#0f1115;color:#f5f7fb;margin:0;padding:32px;}"
-                ".card{max-width:560px;margin:0 auto;padding:28px;border-radius:20px;"
-                "background:linear-gradient(180deg,#1a1f29,#131821);border:1px solid rgba(255,255,255,.08);}"
-                "h1{margin:0 0 12px;font-size:24px;}p{margin:0;color:rgba(245,247,251,.78);line-height:1.5;}"
-                "</style></head><body><div class='card'>"
-                f"<h1>{title}</h1><p>{message}</p>"
-                "</div></body></html>"
-            ).encode("utf-8")
-
-            self.send_response(200 if is_ok else 400)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, fmt, *args):
-            return
-
-    try:
-        server = _ThreadedServer((host, port), _CallbackHandler)
-    except OSError as exc:
-        raise RuntimeError(f"Could not start the MyAnimeList login callback listener on {host}:{port}.") from exc
-
-    try:
-        server.timeout = 0.5
-        while time.time() < timeout_at:
-            server.handle_request()
-            if result["code"] or result["error"]:
-                break
-    finally:
-        server.server_close()
-
-    if result["error"]:
-        reason = result["error_description"] or result["error"]
-        raise RuntimeError(f"MyAnimeList login was not completed: {reason}")
-    if not result["code"]:
-        raise RuntimeError("Timed out waiting for the MyAnimeList browser login to finish.")
-    if result["state"] != expected_state:
-        raise RuntimeError("MyAnimeList login returned an invalid state token.")
-    return exchange_code(config, result["code"])
+    session_id = str(config.get("backendAuthSessionId") or "").strip()
+    if not session_id:
+        raise RuntimeError("Start MyAnimeList auth first so a backend browser session is available.")
+    payload = mal_backend.await_auth_session(
+        config.get("backendUrl"),
+        session_id,
+        timeout_seconds=timeout_seconds,
+    )
+    config = _apply_backend_token_payload(config, payload)
+    backend_session_token = str(payload.get("sessionToken") or "").strip()
+    if not backend_session_token:
+        raise RuntimeError("MyAnimeList backend login did not return a usable session token.")
+    if not config.get("accessToken"):
+        raise RuntimeError("MyAnimeList backend login did not return a usable access token.")
+    config["enabled"] = True
+    config["backendAuthSessionId"] = ""
+    config["backendSessionToken"] = backend_session_token
+    user = payload.get("user") or {}
+    config["userName"] = str(user.get("name") or config.get("userName") or "").strip()
+    config["userPicture"] = str(user.get("picture") or config.get("userPicture") or "").strip()
+    return {
+        "config": _config_for_save(config),
+        "user": {
+            "name": config["userName"],
+            "picture": config["userPicture"],
+        },
+    }
 
 
 def refresh_session(config):
     config = _ensure_access_token(config)
     me = _update_user_profile(config)
     return {
-        "config": config,
+        "config": _config_for_save(config),
         "user": {
             "name": str(me.get("name") or ""),
             "picture": str(me.get("picture") or ""),
@@ -403,7 +226,6 @@ def _with_mal_mapping(entry, mal_id):
         "id": str(mal_id),
     }
     item["providerRefs"] = refs
-    item["malId"] = str(mal_id)
     return item
 
 
@@ -879,7 +701,7 @@ def push_library(config, library_entries):
     _update_user_profile(config)
     config["lastSyncAt"] = int(time.time())
     config["lastSyncDirection"] = "push"
-    payload["config"] = config
+    payload["config"] = _config_for_save(config)
     payload["results"] = results
     return payload
 
@@ -909,7 +731,7 @@ def remove_anime_entry(config, mal_id, title=""):
     _update_user_profile(config)
     config["lastSyncAt"] = int(time.time())
     config["lastSyncDirection"] = "delete"
-    payload["config"] = config
+    payload["config"] = _config_for_save(config)
     return payload
 
 
@@ -1059,6 +881,6 @@ def pull_library(config, library_entries):
     _update_user_profile(config)
     config["lastSyncAt"] = int(time.time())
     config["lastSyncDirection"] = "pull"
-    payload["config"] = config
+    payload["config"] = _config_for_save(config)
     payload["results"] = results
     return payload

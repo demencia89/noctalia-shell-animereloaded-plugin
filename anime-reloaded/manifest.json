@@ -28,7 +28,7 @@
       "preferredProvider": "auto",
       "metadataProvider": "anilist",
       "streamProvider": "allanime",
-      "librarySchemaVersion": 1,
+      "librarySchemaVersion": 2,
       "lastPanelTabIndex": 1,
       "barWidgetIconName": "device-tv",
       "barWidgetText": "AnimeReloaded",

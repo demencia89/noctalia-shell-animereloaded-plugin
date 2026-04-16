@@ -17,7 +17,7 @@ Item {
     property var pluginApi: null
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
-    readonly property int librarySchemaVersion: 1
+    readonly property int librarySchemaVersion: 2
 
     function _pathJoin(base, child) {
         if (!base || base.length === 0)
@@ -147,6 +147,10 @@ Item {
                 provider: resolvedMetadataProvider,
                 id: resolvedMetadataId
             }
+            if (String(item.id || "").trim().length === 0) {
+                item.id = resolvedMetadataId
+                changed = true
+            }
         } else if (item.providerRefs.metadata !== undefined) {
             delete item.providerRefs.metadata
             changed = true
@@ -175,7 +179,7 @@ Item {
                 provider: syncProvider,
                 id: syncId
             }
-        } else if (item.providerRefs.sync !== undefined && !_isObject(item.providerRefs.sync)) {
+        } else if (item.providerRefs.sync !== undefined) {
             delete item.providerRefs.sync
             changed = true
         }
@@ -246,6 +250,254 @@ Item {
         return filtered
     }
 
+    function _emptyRuntimeDiagnostics() {
+        return {
+            version: 1,
+            overall: "unknown",
+            lastRunAt: 0,
+            python3: { status: "unknown", detail: "Not checked yet." },
+            mpv: { status: "unknown", detail: "Not checked yet." },
+            cryptography: { status: "unknown", detail: "Not checked yet." },
+            malBackend: { status: "unknown", detail: "Not checked yet." }
+        }
+    }
+
+    function _parseRuntimeDiagnosticsOutput(output) {
+        var diagnostics = _emptyRuntimeDiagnostics()
+        diagnostics.lastRunAt = Date.now()
+        var lines = String(output || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var line = String(lines[i] || "").trim()
+            if (line.length === 0)
+                continue
+            var separator = line.indexOf("=")
+            if (separator <= 0)
+                continue
+            var key = line.substring(0, separator)
+            var value = line.substring(separator + 1)
+            if (key === "overall") {
+                diagnostics.overall = value || "unknown"
+                continue
+            }
+            var statusSeparator = value.indexOf("|")
+            var status = statusSeparator >= 0 ? value.substring(0, statusSeparator) : value
+            var detail = statusSeparator >= 0 ? value.substring(statusSeparator + 1) : ""
+            if (diagnostics[key] !== undefined)
+                diagnostics[key] = {
+                    status: status || "unknown",
+                    detail: detail || ""
+                }
+        }
+        return diagnostics
+    }
+
+    function _runtimeDiagnosticsScript() {
+        return [
+            "backend_url=$(printf '%s' \"$1\")",
+            "python_path=$(command -v python3 2>/dev/null || true)",
+            "mpv_path=$(command -v mpv 2>/dev/null || true)",
+            "python_status=missing",
+            "python_detail=python3 is not available in PATH.",
+            "mpv_status=missing",
+            "mpv_detail=mpv is not available in PATH.",
+            "crypto_status=skip",
+            "crypto_detail=Skipped because python3 is unavailable.",
+            "backend_status=skip",
+            "backend_detail=Skipped because python3 is unavailable.",
+            "if [ -n \"$python_path\" ]; then",
+            "  py_version=$(python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))' 2>/dev/null || true)",
+            "  if [ -n \"$py_version\" ]; then",
+            "    python_status=ok",
+            "    python_detail=Python\\ $py_version\\ available\\ at\\ $python_path.",
+            "  else",
+            "    python_status=error",
+            "    python_detail=python3 was found but could not report its version.",
+            "  fi",
+            "  if python3 -c 'import cryptography' >/dev/null 2>&1; then",
+            "    crypto_status=ok",
+            "    crypto_detail=Python\\ cryptography\\ package\\ import\\ succeeded.",
+            "  else",
+            "    crypto_status=error",
+            "    crypto_detail=Python\\ cryptography\\ package\\ is\\ missing\\ or\\ broken.",
+            "  fi",
+            "  if [ -n \"$backend_url\" ]; then",
+            "    backend_result=$(python3 - \"$backend_url\" <<'PY'",
+            "import sys",
+            "import urllib.error",
+            "import urllib.request",
+            "",
+            "base = (sys.argv[1] if len(sys.argv) > 1 else '').strip().rstrip('/')",
+            "if not base:",
+            "    print('skip|MAL backend URL is not configured.')",
+            "    raise SystemExit(0)",
+            "url = base + '/healthz'",
+            "try:",
+            "    with urllib.request.urlopen(url, timeout=6) as response:",
+            "        code = int(getattr(response, 'status', response.getcode()))",
+            "        body = response.read(160).decode('utf-8', errors='replace').strip()",
+            "    if 200 <= code < 300:",
+            "        detail = 'Healthy at ' + base",
+            "        if body:",
+            "            detail += ' (' + body.replace('\\n', ' ')[:80] + ')'",
+            "        print('ok|' + detail)",
+            "    else:",
+            "        print('warn|Backend responded with HTTP ' + str(code) + '.')",
+            "except Exception:",
+            "    print('warn|Could not reach MAL backend at ' + base + '.')",
+            "PY",
+            "    )",
+            "    backend_status=${backend_result%%|*}",
+            "    backend_detail=${backend_result#*|}",
+            "  else",
+            "    backend_status=skip",
+            "    backend_detail=MAL\\ backend\\ URL\\ is\\ not\\ configured.",
+            "  fi",
+            "fi",
+            "if [ -n \"$mpv_path\" ]; then",
+            "  mpv_status=ok",
+            "  mpv_detail=mpv\\ available\\ at\\ $mpv_path.",
+            "fi",
+            "overall=ok",
+            "if [ \"$python_status\" != \"ok\" ] || [ \"$mpv_status\" != \"ok\" ] || [ \"$crypto_status\" != \"ok\" ]; then",
+            "  overall=error",
+            "elif [ \"$backend_status\" = \"warn\" ]; then",
+            "  overall=warn",
+            "fi",
+            "printf 'overall=%s\\n' \"$overall\"",
+            "printf 'python3=%s|%s\\n' \"$python_status\" \"$python_detail\"",
+            "printf 'mpv=%s|%s\\n' \"$mpv_status\" \"$mpv_detail\"",
+            "printf 'cryptography=%s|%s\\n' \"$crypto_status\" \"$crypto_detail\"",
+            "printf 'malBackend=%s|%s\\n' \"$backend_status\" \"$backend_detail\""
+        ].join("\n")
+    }
+
+    function runRuntimeDiagnostics() {
+        runtimeDiagnosticsError = ""
+        runtimeDiagnosticsMessage = "Checking runtime dependencies..."
+        runtimeDiagnosticsProc._buf = ""
+        runtimeDiagnosticsProc.command = [
+            "sh", "-c",
+            _runtimeDiagnosticsScript(),
+            "sh",
+            String(malSync?.backendUrl || "")
+        ]
+        isRunningRuntimeDiagnostics = true
+        if (runtimeDiagnosticsProc.running) {
+            runtimeDiagnosticsProc.running = false
+            Qt.callLater(function() { runtimeDiagnosticsProc.running = true })
+        } else {
+            runtimeDiagnosticsProc.running = true
+        }
+    }
+
+    function _entryRepairKey(entry) {
+        return [
+            _showMetadataProviderId(entry),
+            _showMetadataId(entry),
+            String(entry?.id || "")
+        ].join("\u241f")
+    }
+
+    function _hasResolvedPlaybackMapping(entry) {
+        if (!entry)
+            return false
+        var metadataProvider = _showMetadataProviderId(entry)
+        var metadataId = _showMetadataId(entry)
+        if (metadataProvider === "allanime" && metadataId.length > 0)
+            return true
+        var streamRef = entry?.providerRefs?.stream
+        return String(streamRef?.provider || "") === "allanime"
+            && String(streamRef?.id || "").length > 0
+    }
+
+    function unresolvedPlaybackEntries() {
+        return (libraryList || []).filter(function(entry) {
+            return !_hasResolvedPlaybackMapping(entry)
+        })
+    }
+
+    function unresolvedPlaybackCount() {
+        return unresolvedPlaybackEntries().length
+    }
+
+    function _finishMappingRepair() {
+        isRepairingMappings = false
+        var changed = false
+        if (_isObject(_mappingRepairUpdates) && Object.keys(_mappingRepairUpdates).length > 0) {
+            libraryList = (libraryList || []).map(function(entry) {
+                var updatedRefs = _mappingRepairUpdates[_entryRepairKey(entry)]
+                if (!updatedRefs)
+                    return entry
+                changed = true
+                return _mergeLibraryEntry(entry, {
+                    providerRefs: _deepClone(updatedRefs),
+                    updatedAt: Date.now()
+                })
+            })
+            if (changed)
+                _saveLibrary(true)
+        }
+        _mappingRepairQueue = []
+        _mappingRepairUpdates = ({})
+        _mappingRepairCurrentKey = ""
+    }
+
+    function _runNextMappingRepair() {
+        if (!isRepairingMappings)
+            return
+        if ((_mappingRepairQueue || []).length === 0) {
+            _finishMappingRepair()
+            var repaired = Number(mappingRepairSummary?.repaired || 0)
+            var unresolved = Number(mappingRepairSummary?.unresolved || 0)
+            var failed = Number(mappingRepairSummary?.failed || 0)
+            if (repaired > 0)
+                mappingRepairMessage = "Repaired " + repaired + " playback mapping" + (repaired === 1 ? "" : "s") + "."
+            else if (unresolved > 0 || failed > 0)
+                mappingRepairMessage = "No additional playback mappings could be repaired automatically."
+            else
+                mappingRepairMessage = "Library playback mappings are already healthy."
+            return
+        }
+
+        var entry = _mappingRepairQueue.shift()
+        _mappingRepairCurrentKey = _entryRepairKey(entry)
+        mappingRepairProc._buf = ""
+        mappingRepairProc._entry = entry
+        mappingRepairProc.command = _showMetadataCommand(entry, "episodes", [
+            _showMetadataId(entry),
+            currentMode,
+            providerMappingPath,
+            _showStreamProviderId(entry)
+        ])
+        if (mappingRepairProc.running) {
+            mappingRepairProc.running = false
+            Qt.callLater(function() { mappingRepairProc.running = true })
+        } else {
+            mappingRepairProc.running = true
+        }
+    }
+
+    function repairPlaybackMappings() {
+        var queue = unresolvedPlaybackEntries()
+        mappingRepairSummary = {
+            scanned: queue.length,
+            repaired: 0,
+            unresolved: 0,
+            failed: 0
+        }
+        mappingRepairError = ""
+        if (queue.length === 0) {
+            mappingRepairMessage = "All library titles already have playback mappings."
+            return
+        }
+        mappingRepairMessage = "Checking " + queue.length + " library title" + (queue.length === 1 ? "" : "s") + " for playable mappings..."
+        _mappingRepairQueue = queue.slice()
+        _mappingRepairUpdates = ({})
+        _mappingRepairCurrentKey = ""
+        isRepairingMappings = true
+        _runNextMappingRepair()
+    }
+
     IpcHandler {
         target: "plugin:AnimeReloaded"
 
@@ -291,22 +543,12 @@ Item {
 
     function _emptyMalSync() {
         return {
-            version: 1,
+            version: 2,
             enabled: false,
             autoPush: false,
-            clientId: "831f9123c7e50037ce8c395ac713fff2",
-            clientSecret: "",
-            redirectUri: "http://127.0.0.1:8787/animereloaded",
             backendUrl: defaultMalBackendUrl,
             backendAuthSessionId: "",
             backendSessionToken: "",
-            codeVerifier: "",
-            authState: "",
-            authUrl: "",
-            accessToken: "",
-            refreshToken: "",
-            tokenType: "Bearer",
-            expiresAt: 0,
             userName: "",
             userPicture: "",
             lastSyncAt: 0,
@@ -315,33 +557,22 @@ Item {
     }
 
     function _normaliseMalSync(raw) {
-        var config = _deepClone(raw)
-        if (!config || typeof config !== "object" || Array.isArray(config))
-            config = _emptyMalSync()
-        config.version = 1
-        config.enabled = config.enabled === true
-        config.autoPush = config.autoPush === true
-        // MAL sync supports either a backend auth bridge or the legacy local PKCE flow.
-        config.clientId = "831f9123c7e50037ce8c395ac713fff2"
-        config.clientSecret = ""
-        config.redirectUri = "http://127.0.0.1:8787/animereloaded"
-        var backendUrl = String(config.backendUrl || "").trim().replace(/\/+$/, "")
+        var source = _deepClone(raw)
+        if (!source || typeof source !== "object" || Array.isArray(source))
+            source = ({})
+        var config = _emptyMalSync()
+        config.enabled = source.enabled === true
+        config.autoPush = source.autoPush === true
+        var backendUrl = String(source.backendUrl || "").trim().replace(/\/+$/, "")
         if (backendUrl.length === 0 || legacyMalBackendUrls.indexOf(backendUrl) >= 0)
             backendUrl = defaultMalBackendUrl
         config.backendUrl = backendUrl
-        config.backendAuthSessionId = String(config.backendAuthSessionId || "")
-        config.backendSessionToken = String(config.backendSessionToken || "")
-        config.codeVerifier = String(config.codeVerifier || "")
-        config.authState = String(config.authState || "")
-        config.authUrl = String(config.authUrl || "")
-        config.accessToken = String(config.accessToken || "")
-        config.refreshToken = String(config.refreshToken || "")
-        config.tokenType = String(config.tokenType || "Bearer")
-        config.expiresAt = Number(config.expiresAt || 0)
-        config.userName = String(config.userName || "")
-        config.userPicture = String(config.userPicture || "")
-        config.lastSyncAt = Number(config.lastSyncAt || 0)
-        config.lastSyncDirection = String(config.lastSyncDirection || "")
+        config.backendAuthSessionId = String(source.backendAuthSessionId || "")
+        config.backendSessionToken = String(source.backendSessionToken || "")
+        config.userName = String(source.userName || "")
+        config.userPicture = String(source.userPicture || "")
+        config.lastSyncAt = Number(source.lastSyncAt || 0)
+        config.lastSyncDirection = String(source.lastSyncDirection || "")
         return config
     }
 
@@ -387,18 +618,8 @@ Item {
         malAutoPushTimer.stop()
         var next = _normaliseMalSync(malSync)
         next.enabled = false
-        next.clientId = "831f9123c7e50037ce8c395ac713fff2"
-        next.clientSecret = ""
-        next.redirectUri = "http://127.0.0.1:8787/animereloaded"
         next.backendAuthSessionId = ""
         next.backendSessionToken = ""
-        next.codeVerifier = ""
-        next.authState = ""
-        next.authUrl = ""
-        next.accessToken = ""
-        next.refreshToken = ""
-        next.tokenType = "Bearer"
-        next.expiresAt = 0
         next.userName = ""
         next.userPicture = ""
         next.lastSyncAt = 0
@@ -961,19 +1182,32 @@ Item {
     property var    feedNotificationState: _emptyFeedNotificationState()
     property bool   _pendingStartupFeedToast: false
 
+    // ── Runtime diagnostics ──────────────────────────────────────────────────
+    property bool   isRunningRuntimeDiagnostics: false
+    property var    runtimeDiagnostics: _emptyRuntimeDiagnostics()
+    property string runtimeDiagnosticsMessage: ""
+    property string runtimeDiagnosticsError: ""
+
     // ── MyAnimeList sync state ───────────────────────────────────────────────
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
     property string malSyncMessage: ""
     property var    malSyncSummary: ({})
     property var    malSyncResults: []
-    property string malSyncAuthCode: ""
-    property bool   malSyncShowAdvanced: false
     property string _pendingMalCommand: ""
     property bool   _pendingMalShowsToast: true
     property bool   _suppressMalAutoPush: false
     property bool   _pendingMalBrowserAuth: false
     property string _pendingMalBrowserAuthUrl: ""
+
+    // ── Playback mapping repair ──────────────────────────────────────────────
+    property bool   isRepairingMappings: false
+    property var    mappingRepairSummary: ({ scanned: 0, repaired: 0, unresolved: 0, failed: 0 })
+    property string mappingRepairMessage: ""
+    property string mappingRepairError: ""
+    property var    _mappingRepairQueue: []
+    property var    _mappingRepairUpdates: ({})
+    property string _mappingRepairCurrentKey: ""
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -1033,6 +1267,7 @@ Item {
         _ensureProgressDir()
         fetchGenres()
         fetchPopular(true)
+        runRuntimeDiagnostics()
         if ((libraryList || []).length > 0) {
             _pendingStartupFeedToast = true
             startupFeedTimer.start()
@@ -1060,8 +1295,7 @@ Item {
     }
 
     function _malSyncReady() {
-        return String(malSync?.clientId || "").length > 0
-            && String(malSync?.accessToken || "").length > 0
+        return String(malSync?.backendSessionToken || "").length > 0
             && String(malSync?.userName || "").length > 0
     }
 
@@ -1864,7 +2098,15 @@ Item {
         onRunningChanged: {
             if (running) return
             root.isMalSyncBusy = false
-            if (_buf.length === 0) return
+            if (_buf.length === 0) {
+                root.malSyncError = "MyAnimeList command did not return any data."
+                root.malSyncMessage = ""
+                root._pendingMalCommand = ""
+                root._pendingMalBrowserAuth = false
+                root._pendingMalBrowserAuthUrl = ""
+                _buf = ""
+                return
+            }
             try {
                 var d = JSON.parse(_buf)
                 if (d.error) {
@@ -1899,9 +2141,6 @@ Item {
                         root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
                         Qt.openUrlExternally(d.authUrl)
                     }
-                } else if (root._pendingMalCommand === "exchange") {
-                    root.malSyncAuthCode = ""
-                    root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
                 } else if (root._pendingMalCommand === "refresh") {
                     root.malSyncMessage = "Refreshed MyAnimeList session."
                 } else if (root._pendingMalCommand === "delete-entry") {
@@ -1955,7 +2194,12 @@ Item {
             root.isMalSyncBusy = false
             root._pendingMalBrowserAuth = false
             root._pendingMalBrowserAuthUrl = ""
-            if (_buf.length === 0) return
+            if (_buf.length === 0) {
+                root.malSyncError = "MyAnimeList browser sign-in did not return any data."
+                root.malSyncMessage = ""
+                _buf = ""
+                return
+            }
             try {
                 var d = JSON.parse(_buf)
                 if (d.error) {
@@ -1966,7 +2210,6 @@ Item {
                 }
                 if (d.config)
                     root.updateMalSyncConfig(d.config)
-                root.malSyncAuthCode = ""
                 root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
                 root.malSyncError = ""
                 ToastService.showNotice(
@@ -1988,6 +2231,108 @@ Item {
         stderr: SplitParser {
             onRead: function(data) {
                 if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist browser auth:", data)
+            }
+        }
+    }
+
+    Process {
+        id: runtimeDiagnosticsProc
+        property string _buf: ""
+
+        onRunningChanged: {
+            if (running)
+                return
+            root.isRunningRuntimeDiagnostics = false
+            if (_buf.length === 0) {
+                root.runtimeDiagnostics = root._emptyRuntimeDiagnostics()
+                root.runtimeDiagnostics.lastRunAt = Date.now()
+                root.runtimeDiagnostics.overall = "error"
+                root.runtimeDiagnosticsError = "Runtime diagnostics did not return any data."
+                root.runtimeDiagnosticsMessage = ""
+                _buf = ""
+                return
+            }
+            root.runtimeDiagnostics = root._parseRuntimeDiagnosticsOutput(_buf)
+            root.runtimeDiagnosticsError = ""
+            if (root.runtimeDiagnostics.overall === "error")
+                root.runtimeDiagnosticsMessage = "Required runtime dependencies are missing or broken."
+            else if (root.runtimeDiagnostics.overall === "warn")
+                root.runtimeDiagnosticsMessage = "Core playback dependencies are ready, but optional services need attention."
+            else
+                root.runtimeDiagnosticsMessage = "Runtime dependencies look healthy."
+            _buf = ""
+        }
+
+        stdout: SplitParser {
+            onRead: function(data) { runtimeDiagnosticsProc._buf += data + "\n" }
+        }
+        stderr: SplitParser {
+            onRead: function(data) {
+                if (data.trim().length > 0)
+                    Logger.w("AnimeReloaded", "runtime diagnostics:", data)
+            }
+        }
+    }
+
+    Process {
+        id: mappingRepairProc
+        property string _buf: ""
+        property var _entry: null
+
+        onRunningChanged: {
+            if (running)
+                return
+            if (!root.isRepairingMappings)
+                return
+
+            var summary = root._deepClone(root.mappingRepairSummary || ({ scanned: 0, repaired: 0, unresolved: 0, failed: 0 }))
+            var entry = _entry
+
+            if (_buf.length === 0) {
+                summary.failed = Number(summary.failed || 0) + 1
+                root.mappingRepairError = "Playback mapping repair returned no data for " + root._showTitle(entry) + "."
+            } else {
+                try {
+                    var d = JSON.parse(_buf)
+                    if (d.error) {
+                        summary.failed = Number(summary.failed || 0) + 1
+                        root.mappingRepairError = String(d.error || "Playback mapping repair failed.")
+                    } else if (root._hasResolvedPlaybackMapping(d)) {
+                        summary.repaired = Number(summary.repaired || 0) + 1
+                        if (d.providerRefs)
+                            root._mappingRepairUpdates[root._entryRepairKey(entry)] = root._deepClone(d.providerRefs)
+                        if (root.currentAnime && root._entryRepairKey(root.currentAnime) === root._entryRepairKey(entry)) {
+                            root.currentAnime = Object.assign({}, root.currentAnime, {
+                                providerRefs: root._deepClone(d.providerRefs || root.currentAnime.providerRefs || {})
+                            })
+                        }
+                    } else {
+                        summary.unresolved = Number(summary.unresolved || 0) + 1
+                    }
+                } catch (e) {
+                    summary.failed = Number(summary.failed || 0) + 1
+                    root.mappingRepairError = "Playback mapping repair parse error: " + e
+                    Logger.w("AnimeReloaded", "mapping repair parse error:", e)
+                }
+            }
+
+            root.mappingRepairSummary = summary
+            root.mappingRepairMessage = "Processed "
+                + (Number(summary.repaired || 0) + Number(summary.unresolved || 0) + Number(summary.failed || 0))
+                + " of " + Number(summary.scanned || 0)
+                + " unresolved title" + (Number(summary.scanned || 0) === 1 ? "" : "s") + "."
+            _entry = null
+            _buf = ""
+            Qt.callLater(root._runNextMappingRepair)
+        }
+
+        stdout: SplitParser {
+            onRead: function(data) { mappingRepairProc._buf += data }
+        }
+        stderr: SplitParser {
+            onRead: function(data) {
+                if (data.trim().length > 0)
+                    Logger.w("AnimeReloaded", "mapping repair:", data)
             }
         }
     }
@@ -2276,8 +2621,8 @@ Item {
 
     // ── Public API ────────────────────────────────────────────────────────────
     function startMalBrowserAuth() {
-        if (String(malSync?.clientId || "").trim().length === 0) {
-            malSyncError = "MyAnimeList is not configured yet."
+        if (String(malSync?.backendUrl || "").trim().length === 0) {
+            malSyncError = "The MyAnimeList backend URL is not configured."
             return
         }
         _pendingMalBrowserAuth = true
@@ -2286,27 +2631,8 @@ Item {
         _queueMalCommand("auth-url", false, [], false)
     }
 
-    function startMalAuth() {
-        _pendingMalBrowserAuth = false
-        _pendingMalBrowserAuthUrl = ""
-        if (String(malSync?.clientId || "").trim().length === 0) {
-            malSyncError = "MyAnimeList client id is required before connecting."
-            return
-        }
-        _queueMalCommand("auth-url", false, [], false)
-    }
-
-    function exchangeMalAuthCode() {
-        var code = String(malSyncAuthCode || "").trim()
-        if (code.length === 0) {
-            malSyncError = "Paste the authorization code from the browser redirect first."
-            return
-        }
-        _queueMalCommand("exchange", false, [code], true)
-    }
-
     function refreshMalSyncSession(showToast) {
-        if (String(malSync?.refreshToken || "").length === 0 && String(malSync?.accessToken || "").length === 0) {
+        if (String(malSync?.backendSessionToken || "").length === 0) {
             malSyncError = "Connect a MyAnimeList account before refreshing."
             return
         }

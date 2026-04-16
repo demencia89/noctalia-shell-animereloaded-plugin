@@ -9,7 +9,6 @@ Item {
 
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
-    readonly property bool showMalAdvancedControls: false
     property string malInspectorFilter: ""
     readonly property var malInspectorEntries: {
         var _ = anime?.libraryVersion ?? 0
@@ -292,6 +291,86 @@ Item {
         if (!settingsView._malNeedsAttention(item))
             return ""
         return String(item?.detail || "")
+    }
+
+    function _runtimeCheck(key) {
+        var checks = anime?.runtimeDiagnostics || ({})
+        var item = checks[key]
+        if (!item || typeof item !== "object")
+            return { status: "unknown", detail: "Not checked yet." }
+        return item
+    }
+
+    function _runtimeTone(status) {
+        var resolved = String(status || "")
+        if (resolved === "ok")
+            return Color.mTertiary
+        if (resolved === "warn")
+            return Color.mPrimary
+        if (resolved === "error" || resolved === "missing")
+            return Color.mError
+        return Color.mOnSurfaceVariant
+    }
+
+    function _runtimeToneKey(status) {
+        var resolved = String(status || "")
+        if (resolved === "ok")
+            return "accent"
+        if (resolved === "warn")
+            return "primary"
+        if (resolved === "error" || resolved === "missing")
+            return "error"
+        return "muted"
+    }
+
+    function _runtimeStatusLabel(status) {
+        var resolved = String(status || "")
+        if (resolved === "ok")
+            return "Ready"
+        if (resolved === "warn")
+            return "Warning"
+        if (resolved === "error")
+            return "Error"
+        if (resolved === "missing")
+            return "Missing"
+        if (resolved === "skip")
+            return "Skipped"
+        return "Pending"
+    }
+
+    function _runtimeSummaryText() {
+        var overall = String(anime?.runtimeDiagnostics?.overall || "unknown")
+        if (overall === "ok")
+            return "Playback dependencies are available and the optional MAL backend looks reachable."
+        if (overall === "warn")
+            return "Core playback dependencies look healthy, but the optional MAL backend still needs attention."
+        if (overall === "error")
+            return "One or more required playback dependencies are missing or broken."
+        return "Run a quick self-test to verify local playback dependencies and MAL backend reachability."
+    }
+
+    function _runtimeLastCheckedText() {
+        var ts = Number(anime?.runtimeDiagnostics?.lastRunAt || 0)
+        if (ts <= 0)
+            return "Not checked yet."
+        return "Last checked " + new Date(ts).toLocaleString()
+    }
+
+    function _mappingRepairHint() {
+        var unresolved = anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0
+        if (unresolved > 0)
+            return String(unresolved) + " library title" + (unresolved === 1 ? "" : "s") + " still need a playable stream mapping."
+        return "All current library titles already have a playback mapping or use AllAnime metadata directly."
+    }
+
+    function _mappingRepairSummaryText() {
+        var summary = anime?.mappingRepairSummary || ({})
+        var scanned = Number(summary.scanned || 0)
+        if (scanned <= 0)
+            return settingsView._mappingRepairHint()
+        return String(summary.repaired || 0) + " repaired · "
+            + String(summary.unresolved || 0) + " unresolved · "
+            + String(summary.failed || 0) + " failed"
     }
 
     component SettingsCard: Rectangle {
@@ -678,6 +757,299 @@ Item {
                                 label: settingsView.localLibraryCount + " in library"
                                 toneColor: Color.mPrimary
                                 textColor: Color.mOnSurface
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        width: parent.width
+                        tintColor: String(anime?.runtimeDiagnostics?.overall || "") === "error"
+                            ? Color.mError
+                            : (String(anime?.runtimeDiagnostics?.overall || "") === "warn"
+                                ? Color.mPrimary
+                                : Color.mTertiary)
+                        tintStrength: 0.07
+                        contentSpacing: 14
+
+                        RowLayout {
+                            width: parent.width
+                            spacing: 10
+
+                            Rectangle {
+                                width: 30
+                                height: 30
+                                radius: 15
+                                color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "✓"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    color: Color.mPrimary
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Text {
+                                    text: "Runtime Health"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: settingsView._runtimeSummaryText()
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 11
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.76
+                                }
+                            }
+                        }
+
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+
+                            SummaryPill {
+                                label: settingsView._runtimeStatusLabel(anime?.runtimeDiagnostics?.overall || "unknown")
+                                toneColor: settingsView._runtimeTone(anime?.runtimeDiagnostics?.overall || "unknown")
+                                textColor: settingsView._runtimeTone(anime?.runtimeDiagnostics?.overall || "unknown")
+                            }
+
+                            SummaryPill {
+                                label: (anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0)
+                                    + " unresolved mappings"
+                                toneColor: (anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0) > 0
+                                    ? Color.mPrimary
+                                    : Color.mTertiary
+                                textColor: (anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0) > 0
+                                    ? Color.mPrimary
+                                    : Color.mTertiary
+                            }
+
+                            SummaryPill {
+                                label: settingsView._runtimeLastCheckedText()
+                                toneColor: Color.mOnSurfaceVariant
+                                textColor: Color.mOnSurfaceVariant
+                                maxWidth: settingsView.wideLayout ? 320 : Math.max(180, parent.width - 12)
+                            }
+                        }
+
+                        GridLayout {
+                            width: parent.width
+                            columns: settingsView.wideLayout ? 2 : 1
+                            columnSpacing: 12
+                            rowSpacing: 12
+
+                            SettingsInsetPanel {
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
+                                tintColor: settingsView._runtimeTone(anime?.runtimeDiagnostics?.overall || "unknown")
+                                tintStrength: 0.04
+                                baseAlpha: 0.88
+                                contentSpacing: 8
+
+                                Text {
+                                    text: "Dependency Checks"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    Repeater {
+                                        model: [
+                                            { key: "python3", label: "Python 3" },
+                                            { key: "mpv", label: "mpv" },
+                                            { key: "cryptography", label: "cryptography" },
+                                            { key: "malBackend", label: "MAL Backend" }
+                                        ]
+
+                                        delegate: Rectangle {
+                                            width: parent.width
+                                            radius: 14
+                                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+                                            border.width: 1
+                                            border.color: settingsView._withAlpha(
+                                                settingsView._runtimeTone(settingsView._runtimeCheck(modelData.key).status), 0.26)
+                                            implicitHeight: checkColumn.implicitHeight + 16
+
+                                            Column {
+                                                id: checkColumn
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 4
+
+                                                Row {
+                                                    width: parent.width
+                                                    spacing: 8
+
+                                                    Rectangle {
+                                                        width: checkStatusLabel.implicitWidth + 16
+                                                        height: 22
+                                                        radius: 11
+                                                        color: settingsView._malToneFill(
+                                                            settingsView._runtimeToneKey(settingsView._runtimeCheck(modelData.key).status), true)
+                                                        border.width: 1
+                                                        border.color: settingsView._withAlpha(
+                                                            settingsView._runtimeTone(settingsView._runtimeCheck(modelData.key).status), 0.28)
+
+                                                        Text {
+                                                            id: checkStatusLabel
+                                                            anchors.centerIn: parent
+                                                            text: settingsView._runtimeStatusLabel(settingsView._runtimeCheck(modelData.key).status)
+                                                            font.pixelSize: 10
+                                                            font.bold: true
+                                                            color: settingsView._runtimeTone(settingsView._runtimeCheck(modelData.key).status)
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        width: Math.max(0, parent.width - checkStatusLabel.parent.width - 12)
+                                                        text: modelData.label
+                                                        font.pixelSize: 11
+                                                        font.bold: true
+                                                        elide: Text.ElideRight
+                                                        color: Color.mOnSurface
+                                                    }
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: settingsView._runtimeCheck(modelData.key).detail
+                                                    wrapMode: Text.Wrap
+                                                    lineHeight: 1.3
+                                                    font.pixelSize: 10
+                                                    color: Color.mOnSurfaceVariant
+                                                    opacity: 0.76
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 10
+
+                                    ActionChip {
+                                        text: anime?.isRunningRuntimeDiagnostics ? "Checking..." : "Refresh Checks"
+                                        leadingText: "↻"
+                                        enabled: !(anime?.isRunningRuntimeDiagnostics ?? false)
+                                            && !(anime?.isRepairingMappings ?? false)
+                                        onClicked: if (anime) anime.runRuntimeDiagnostics()
+                                    }
+                                }
+
+                                Text {
+                                    visible: String(anime?.runtimeDiagnosticsMessage || "").length > 0
+                                    width: parent.width
+                                    text: anime?.runtimeDiagnosticsMessage || ""
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 10
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.78
+                                }
+
+                                Text {
+                                    visible: String(anime?.runtimeDiagnosticsError || "").length > 0
+                                    width: parent.width
+                                    text: anime?.runtimeDiagnosticsError || ""
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 10
+                                    color: Color.mError
+                                }
+                            }
+
+                            SettingsInsetPanel {
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
+                                tintColor: (anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0) > 0
+                                    ? Color.mPrimary
+                                    : Color.mTertiary
+                                tintStrength: 0.04
+                                baseAlpha: 0.88
+                                contentSpacing: 8
+
+                                Text {
+                                    text: "Playback Mapping Repair"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: settingsView._mappingRepairHint()
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 10
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.76
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    SummaryPill {
+                                        label: settingsView._mappingRepairSummaryText()
+                                        toneColor: (anime?.mappingRepairSummary?.repaired || 0) > 0
+                                            ? Color.mTertiary
+                                            : Color.mOnSurfaceVariant
+                                        textColor: (anime?.mappingRepairSummary?.repaired || 0) > 0
+                                            ? Color.mTertiary
+                                            : Color.mOnSurfaceVariant
+                                        maxWidth: settingsView.wideLayout ? 360 : Math.max(180, parent.width - 12)
+                                    }
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 10
+
+                                    ActionChip {
+                                        text: anime?.isRepairingMappings ? "Repairing..." : "Repair Mappings"
+                                        leadingText: "↺"
+                                        enabled: !(anime?.isRepairingMappings ?? false)
+                                            && !(anime?.isRunningRuntimeDiagnostics ?? false)
+                                            && ((anime?.unresolvedPlaybackCount ? anime.unresolvedPlaybackCount() : 0) > 0)
+                                        onClicked: if (anime) anime.repairPlaybackMappings()
+                                    }
+                                }
+
+                                Text {
+                                    visible: String(anime?.mappingRepairMessage || "").length > 0
+                                    width: parent.width
+                                    text: anime?.mappingRepairMessage || ""
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 10
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.78
+                                }
+
+                                Text {
+                                    visible: String(anime?.mappingRepairError || "").length > 0
+                                    width: parent.width
+                                    text: anime?.mappingRepairError || ""
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 10
+                                    color: Color.mError
+                                }
                             }
                         }
                     }
@@ -1226,13 +1598,6 @@ Item {
                                                     onClicked: if (anime) anime.pushMalSync(true)
                                                 }
 
-                                                ActionChip {
-                                                    visible: settingsView.showMalAdvancedControls
-                                                    text: anime?.malSyncShowAdvanced ? "Hide Advanced" : "Advanced"
-                                                    leadingText: anime?.malSyncShowAdvanced ? "-" : "+"
-                                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                                    onClicked: if (anime) anime.malSyncShowAdvanced = !anime.malSyncShowAdvanced
-                                                }
                                             }
 
                                             Text {
@@ -1245,178 +1610,6 @@ Item {
                                                 opacity: 0.68
                                             }
                                         }
-                                    }
-
-                                    SettingsInsetPanel {
-                                        visible: settingsView.showMalAdvancedControls
-                                            && (anime?.malSyncShowAdvanced ?? false)
-                                        width: parent.width
-                                        tintColor: Color.mPrimary
-                                        tintStrength: 0.05
-                                        baseAlpha: 0.9
-                                        contentSpacing: 10
-
-                                        Text {
-                                            text: "Advanced OAuth"
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                            color: Color.mOnSurface
-                                        }
-
-                                        Text {
-                                            width: parent.width
-                                            text: "Use these only when debugging a custom MyAnimeList app or a non-default auth bridge."
-                                            wrapMode: Text.Wrap
-                                            lineHeight: 1.35
-                                            font.pixelSize: 10
-                                            color: Color.mOnSurfaceVariant
-                                            opacity: 0.72
-                                        }
-
-                                        GridLayout {
-                                            width: parent.width
-                                            columns: settingsView.wideLayout ? 2 : 1
-                                            columnSpacing: 12
-                                            rowSpacing: 10
-
-                                            Column {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                Text {
-                                                    text: "Backend URL"
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    color: Color.mOnSurface
-                                                }
-
-                                                SettingTextField {
-                                                    width: parent.width
-                                                    value: anime?.malSync?.backendUrl || ""
-                                                    placeholderText: "Optional shared MAL auth bridge URL"
-                                                    onTextEdited: function(text) {
-                                                        if (anime) anime.setMalSyncField("backendUrl", text)
-                                                    }
-                                                }
-                                            }
-
-                                            Column {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                Text {
-                                                    text: "Client ID"
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    color: Color.mOnSurface
-                                                }
-
-                                                SettingTextField {
-                                                    width: parent.width
-                                                    value: anime?.malSync?.clientId || ""
-                                                    placeholderText: "MyAnimeList client id"
-                                                    onTextEdited: function(text) {
-                                                        if (anime) anime.setMalSyncField("clientId", text)
-                                                    }
-                                                }
-                                            }
-
-                                            Column {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                Text {
-                                                    text: "Client Secret"
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    color: Color.mOnSurface
-                                                }
-
-                                                SettingTextField {
-                                                    width: parent.width
-                                                    value: anime?.malSync?.clientSecret || ""
-                                                    placeholderText: "Optional client secret"
-                                                    secret: true
-                                                    onTextEdited: function(text) {
-                                                        if (anime) anime.setMalSyncField("clientSecret", text)
-                                                    }
-                                                }
-                                            }
-
-                                            Column {
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                Text {
-                                                    text: "Redirect URI"
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    color: Color.mOnSurface
-                                                }
-
-                                                SettingTextField {
-                                                    width: parent.width
-                                                    value: anime?.malSync?.redirectUri || ""
-                                                    placeholderText: "Registered redirect URI, if your MAL app requires one"
-                                                    onTextEdited: function(text) {
-                                                        if (anime) anime.setMalSyncField("redirectUri", text)
-                                                    }
-                                                }
-                                            }
-
-                                            Column {
-                                                Layout.columnSpan: settingsView.wideLayout ? 2 : 1
-                                                Layout.fillWidth: true
-                                                spacing: 8
-
-                                                Text {
-                                                    text: "Manual Authorization Code"
-                                                    font.pixelSize: 11
-                                                    font.bold: true
-                                                    color: Color.mOnSurface
-                                                }
-
-                                                SettingTextField {
-                                                    width: parent.width
-                                                    value: anime?.malSyncAuthCode || ""
-                                                    placeholderText: "Paste the `code` query parameter from the browser redirect"
-                                                    onTextEdited: function(text) {
-                                                        if (anime) anime.malSyncAuthCode = text
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Flow {
-                                            width: parent.width
-                                            spacing: 10
-
-                                            ActionChip {
-                                                text: "Open Auth"
-                                                leadingText: "↗"
-                                                enabled: !(anime?.isMalSyncBusy ?? false)
-                                                onClicked: if (anime) anime.startMalAuth()
-                                            }
-
-                                            ActionChip {
-                                                text: "Finish Manual Connect"
-                                                leadingText: "✓"
-                                                enabled: !(anime?.isMalSyncBusy ?? false)
-                                                onClicked: if (anime) anime.exchangeMalAuthCode()
-                                            }
-                                        }
-                                    }
-
-                                    Text {
-                                        visible: settingsView.showMalAdvancedControls
-                                            && !(anime?.malSyncShowAdvanced ?? false)
-                                        width: parent.width
-                                        text: "Advanced OAuth overrides stay hidden unless you need to debug a custom MAL app."
-                                        wrapMode: Text.Wrap
-                                        lineHeight: 1.35
-                                        font.pixelSize: 10
-                                        color: Color.mOnSurfaceVariant
-                                        opacity: 0.62
                                     }
 
                                     SettingsInsetPanel {

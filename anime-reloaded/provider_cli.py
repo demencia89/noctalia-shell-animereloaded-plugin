@@ -13,7 +13,6 @@ New usage:
   python3 provider_cli.py stream <provider> resolve <show_id> <episode_number> <sub|dub> [mirror_pref] [quality_pref] [mapping_cache] [metadata_provider]
   python3 provider_cli.py sync myanimelist auth-url <config_json_path>
   python3 provider_cli.py sync myanimelist listen-exchange <config_json_path> [timeout_seconds]
-  python3 provider_cli.py sync myanimelist exchange <config_json_path> <authorization_code>
   python3 provider_cli.py sync myanimelist refresh <config_json_path>
   python3 provider_cli.py sync myanimelist delete-entry <config_json_path> <mal_id> [title]
   python3 provider_cli.py sync myanimelist push <config_json_path> <library_json_path>
@@ -198,11 +197,6 @@ def _run_sync_command(args):
 
     if command == "auth-url":
         _print_json(mal_sync.build_auth_url(config))
-        return
-
-    if command == "exchange":
-        code = args[4] if len(args) > 4 else ""
-        _print_json(mal_sync.exchange_code(config, code))
         return
 
     if command == "listen-exchange":
