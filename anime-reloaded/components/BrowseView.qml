@@ -53,6 +53,14 @@ Item {
         searchField.forceActiveFocus()
     }
 
+    function toggleSearch() {
+        searchBar.visible = !searchBar.visible
+        if (searchBar.visible)
+            searchField.forceActiveFocus()
+        else
+            browseView.closeSearch()
+    }
+
     function closeSearch(resetFeed) {
         if (resetFeed === undefined) resetFeed = true
         searchBar.visible = false
@@ -251,6 +259,7 @@ Item {
                         color: Color.mOnSurface
                         font.pixelSize: 13
                         clip: true
+                        selectByMouse: true
                         onTextChanged: searchDebounce.restart()
                         Keys.onEscapePressed: {
                             browseView.closeSearch()
@@ -307,41 +316,11 @@ Item {
                 }
 
                 // Search toggle
-                Item {
-                    width: 38; height: 38
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 32; height: 32; radius: 16
-                        color: (searchBar.visible || browseSearchToggleArea.containsMouse)
-                            ? Color.mPrimaryContainer
-                            : "transparent"
-                        border.width: browseSearchToggleArea.containsMouse ? 1 : 0
-                        border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.25)
-                        scale: browseSearchToggleArea.containsMouse ? 1.06 : 1.0
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.width { NumberAnimation { duration: 180 } }
-                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⌕"; font.pixelSize: 18
-                        color: (searchBar.visible || browseSearchToggleArea.containsMouse)
-                            ? Color.mOnPrimaryContainer
-                            : Color.mOnSurfaceVariant
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                    }
-                    MouseArea {
-                        id: browseSearchToggleArea
-                        anchors.fill: parent
-                        z: 1
-                        hoverEnabled: true
-                        onClicked: {
-                            searchBar.visible = !searchBar.visible
-                            if (searchBar.visible) searchField.forceActiveFocus()
-                            else browseView.closeSearch()
-                        }
-                    }
+                HoverIconButton {
+                    text: "⌕"
+                    iconPixelSize: 18
+                    selected: searchBar.visible
+                    onClicked: browseView.toggleSearch()
                 }
 
                 // Sub / Dub toggle
@@ -390,39 +369,10 @@ Item {
                     }
                 }
 
-                Item {
-                    width: 38; height: 38
-                    readonly property bool hovered: settingsHover.hovered
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 32; height: 32; radius: 16
-                        color: parent.hovered
-                            ? Color.mPrimaryContainer
-                            : "transparent"
-                        border.width: parent.hovered ? 1 : 0
-                        border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.25)
-                        scale: parent.hovered ? 1.06 : 1.0
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.width { NumberAnimation { duration: 180 } }
-                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⚙"
-                        font.pixelSize: 15
-                        color: parent.hovered
-                            ? Color.mOnPrimaryContainer
-                            : Color.mOnSurfaceVariant
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                    }
-                    HoverHandler { id: settingsHover }
-                    MouseArea {
-                        id: settingsArea
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: browseView.settingsRequested()
-                    }
+                HoverIconButton {
+                    text: "⚙"
+                    iconPixelSize: 15
+                    onClicked: browseView.settingsRequested()
                 }
             }
         }
@@ -446,57 +396,22 @@ Item {
                         { label: "Recent", value: "recent" }
                     ]
 
-                    delegate: Item {
-                        width: feedLabel.implicitWidth + 28
-                        height: 30
-
+                    delegate: ChoiceChip {
                         readonly property bool active: (anime?.currentView === modelData.value)
                             || (anime?.currentView === "search" && anime?.browseFeed === modelData.value)
-                        readonly property bool hovered: feedTabHover.hovered
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 15
-                            color: active
-                                ? Color.mPrimary
-                                : (hovered
-                                    ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
-                                    : Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.82))
-                            border.width: 1
-                            border.color: active
-                                ? Color.mPrimary
-                                : (hovered
-                                    ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.45)
-                                    : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28))
-                            Behavior on color { ColorAnimation { duration: 160 } }
-                            Behavior on border.color { ColorAnimation { duration: 160 } }
-                        }
-
-                        Text {
-                            id: feedLabel
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.pixelSize: 11
-                            font.bold: active
-                            font.letterSpacing: 0.4
-                            color: active ? Color.mOnPrimary : (hovered ? Color.mPrimary : Color.mOnSurfaceVariant)
-                            Behavior on color { ColorAnimation { duration: 160 } }
-                        }
-
-                        HoverHandler { id: feedTabHover }
-
-                        MouseArea {
-                            id: feedTabArea
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (!anime) return
-                                browseView.closeSearch(false)
-                                if (modelData.value === "recent")
-                                    anime.fetchRecent(true)
-                                else
-                                    anime.fetchPopular(true)
-                            }
+                        text: modelData.label
+                        selected: active
+                        controlHeight: 30
+                        fontPixelSize: 11
+                        letterSpacing: 0.4
+                        minWidth: 68
+                        onClicked: {
+                            if (!anime) return
+                            browseView.closeSearch(false)
+                            if (modelData.value === "recent")
+                                anime.fetchRecent(true)
+                            else
+                                anime.fetchPopular(true)
                         }
                     }
                 }
@@ -524,53 +439,18 @@ Item {
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.HorizontalFlick
 
-                delegate: Item {
-                    width: genreLabel.implicitWidth + 28
-                    height: 32
-                    anchors.verticalCenter: parent.verticalCenter
-
+                delegate: ChoiceChip {
                     readonly property bool active: (modelData === "All" && (anime?.currentGenre ?? "") === "") ||
                                                    (anime?.currentGenre === modelData)
-                    readonly property bool hovered: genreHover.hovered
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 16
-                        color: active
-                            ? Color.mPrimary
-                            : (hovered
-                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
-                                : Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.82))
-                        border.color: active
-                            ? Color.mPrimary
-                            : (hovered
-                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.45)
-                                : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28))
-                        border.width: 1
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                        Behavior on border.color { ColorAnimation { duration: 160 } }
-                    }
-
-                    Text {
-                        id: genreLabel
-                        anchors.centerIn: parent
-                        text: modelData
-                        font.pixelSize: 11; font.bold: active
-                        color: active ? Color.mOnPrimary : (hovered ? Color.mPrimary : Color.mOnSurfaceVariant)
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                    }
-
-                    HoverHandler { id: genreHover }
-
-                    MouseArea {
-                        id: genreArea
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (anime) {
-                                anime.setGenre(modelData === "All" ? "" : modelData)
-                            }
-                        }
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData
+                    selected: active
+                    controlHeight: 32
+                    fontPixelSize: 11
+                    minWidth: 58
+                    onClicked: {
+                        if (anime)
+                            anime.setGenre(modelData === "All" ? "" : modelData)
                     }
                 }
 

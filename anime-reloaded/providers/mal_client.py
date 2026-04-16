@@ -12,8 +12,26 @@ import urllib.request
 
 AUTH_BASE = "https://myanimelist.net/v1/oauth2"
 API_BASE = "https://api.myanimelist.net/v2"
-AGENT = "AnimeReloaded/2.2"
+AGENT = "AnimeReloaded/3.0"
 _VERIFIER_ALPHABET = string.ascii_letters + string.digits + "-._~"
+
+
+class MalApiError(RuntimeError):
+    def __init__(self, status_code, code="", message="", body=""):
+        self.status_code = int(status_code or 0)
+        self.code = str(code or "").strip()
+        self.message = str(message or "").strip()
+        self.body = str(body or "").strip()
+
+        label = self.message or self.code or "MyAnimeList request failed."
+        if self.code:
+            label = f"{self.code}: {label}"
+        super().__init__(label)
+
+    @property
+    def is_content_filter(self):
+        haystack = " ".join([self.code.lower(), self.message.lower(), self.body.lower()])
+        return "inappropriate content" in haystack
 
 
 def generate_code_verifier(length=64):
@@ -21,10 +39,16 @@ def generate_code_verifier(length=64):
     return "".join(secrets.choice(_VERIFIER_ALPHABET) for _ in range(size))
 
 
-def build_authorize_url(client_id, code_verifier, redirect_uri=""):
+def generate_state(length=24):
+    size = max(12, int(length or 24))
+    return secrets.token_urlsafe(size)
+
+
+def build_authorize_url(client_id, code_verifier, redirect_uri="", state=""):
     client_id = str(client_id or "").strip()
     code_verifier = str(code_verifier or "").strip()
     redirect_uri = str(redirect_uri or "").strip()
+    state = str(state or "").strip()
     if not client_id:
         raise RuntimeError("MyAnimeList client id is required.")
     if len(code_verifier) < 43:
@@ -36,6 +60,8 @@ def build_authorize_url(client_id, code_verifier, redirect_uri=""):
         "code_challenge": code_verifier,
         "code_challenge_method": "plain",
     }
+    if state:
+        params["state"] = state
     if redirect_uri:
         params["redirect_uri"] = redirect_uri
     return AUTH_BASE + "/authorize?" + urllib.parse.urlencode(params)
@@ -113,9 +139,21 @@ def api_request(method, path, access_token, *, params=None, data=None):
         encoded_data = urllib.parse.urlencode(data).encode("utf-8")
 
     request = urllib.request.Request(url, data=encoded_data, headers=headers, method=method.upper())
-    with urllib.request.urlopen(request, timeout=20) as response:
-        body = response.read().decode("utf-8")
-        return json.loads(body) if body else {}
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            body = response.read().decode("utf-8")
+            return json.loads(body) if body else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        payload = {}
+        try:
+            payload = json.loads(body) if body else {}
+        except Exception:
+            payload = {}
+
+        code = str(payload.get("error") or payload.get("code") or "").strip()
+        message = str(payload.get("message") or payload.get("error_description") or exc.reason or "").strip()
+        raise MalApiError(exc.code, code=code, message=message, body=body) from exc
 
 
 def get_me(access_token):
@@ -141,6 +179,57 @@ def get_anime_status(access_token, anime_id):
     )
 
 
+def get_user_animelist_page(access_token, username="@me", *, status="", limit=100, offset=0):
+    fields = [
+        "list_status",
+        "num_episodes",
+        "status",
+        "media_type",
+        "start_season",
+        "alternative_titles",
+        "main_picture",
+    ]
+    params = {
+        "limit": max(1, min(1000, int(limit or 100))),
+        "offset": max(0, int(offset or 0)),
+        "fields": ",".join(fields),
+    }
+    status = str(status or "").strip().lower()
+    if status and status != "all":
+        params["status"] = status
+    return api_request(
+        "GET",
+        f"/users/{urllib.parse.quote(str(username or '@me').strip() or '@me', safe='@')}/animelist",
+        access_token,
+        params=params,
+    )
+
+
+def get_user_animelist(access_token, username="@me", *, status="", limit=100):
+    items = []
+    offset = 0
+    page_size = max(1, min(1000, int(limit or 100)))
+
+    while True:
+        payload = get_user_animelist_page(
+            access_token,
+            username,
+            status=status,
+            limit=page_size,
+            offset=offset,
+        )
+        page_items = payload.get("data") or []
+        if not isinstance(page_items, list):
+            break
+        items.extend(page_items)
+        paging = payload.get("paging") or {}
+        if not page_items or not paging.get("next"):
+            break
+        offset += len(page_items)
+
+    return items
+
+
 def update_anime_list_status(access_token, anime_id, *, status="", num_watched_episodes=None):
     payload = {}
     if status:
@@ -150,6 +239,10 @@ def update_anime_list_status(access_token, anime_id, *, status="", num_watched_e
     if not payload:
         raise RuntimeError("No MyAnimeList list fields were provided to update.")
     return api_request("PUT", f"/anime/{int(anime_id)}/my_list_status", access_token, data=payload)
+
+
+def delete_anime_list_status(access_token, anime_id):
+    return api_request("DELETE", f"/anime/{int(anime_id)}/my_list_status", access_token)
 
 
 def token_expiry_timestamp(token_payload):

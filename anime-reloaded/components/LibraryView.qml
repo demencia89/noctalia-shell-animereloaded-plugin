@@ -72,6 +72,29 @@ Item {
         typeFilter = "all"
     }
 
+    function _activeFilterSummary() {
+        var parts = []
+        var progressLabel = null
+        var typeLabel = null
+        for (var i = 0; i < progressFilterOptions.length; i++) {
+            if (progressFilterOptions[i].key === progressFilter) {
+                progressLabel = progressFilterOptions[i]
+                break
+            }
+        }
+        for (var j = 0; j < typeFilterOptions.length; j++) {
+            if (typeFilterOptions[j].key === typeFilter) {
+                typeLabel = typeFilterOptions[j]
+                break
+            }
+        }
+        if (progressFilter !== "all" && progressLabel)
+            parts.push(progressLabel.label)
+        if (typeFilter !== "all" && typeLabel)
+            parts.push(typeLabel.label)
+        return parts.length > 0 ? parts.join(" · ") : "Progress and type"
+    }
+
     function _numericValue(value) {
         var parsed = Number(value)
         return isFinite(parsed) ? parsed : 0
@@ -93,6 +116,10 @@ Item {
             total++
         }
         return total
+    }
+
+    function _entryProgressCount(entry) {
+        return Math.max(_entryWatchedCount(entry), _entryLastWatched(entry))
     }
 
     function _entryHasActiveProgress(entry) {
@@ -124,7 +151,7 @@ Item {
         var totalEpisodes = _numericValue(entry?.episodeCount || 0)
         if (totalEpisodes <= 0)
             return false
-        return _entryWatchedCount(entry) >= totalEpisodes
+        return _entryProgressCount(entry) >= totalEpisodes
     }
 
     function _entryUpToDate(entry) {
@@ -133,8 +160,19 @@ Item {
         var available = _entryAvailableCount(entry)
         if (available <= 0)
             return false
-        return _entryWatchedCount(entry) >= available ||
-            _entryLastWatched(entry) >= available
+        return _entryProgressCount(entry) >= available
+    }
+
+    function _entryProgressState(entry) {
+        if (_entryCompleted(entry))
+            return { key: "completed", label: "Completed" }
+        if (_entryHasActiveProgress(entry))
+            return { key: "continue", label: "Continue" }
+        if (_entryUpToDate(entry))
+            return { key: "up-to-date", label: "Up to Date" }
+        if (_entryStarted(entry))
+            return { key: "in-progress", label: "In Progress" }
+        return { key: "not-started", label: "Not Started" }
     }
 
     function _matchesProgressFilter(entry) {
@@ -169,9 +207,51 @@ Item {
         return typeFilter === "all" || _entryTypeGroup(entry) === typeFilter
     }
 
+    function _malBadgeFill(badge) {
+        var tone = String(badge?.tone || "")
+        var base = Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.95)
+        if (tone === "error")
+            return Qt.tint(base, Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.2))
+        if (tone === "accent")
+            return Qt.tint(base, Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.2))
+        if (tone === "primary")
+            return Qt.tint(base, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.2))
+        return Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.93)
+    }
+
+    function _malBadgeBorder(badge) {
+        var tone = String(badge?.tone || "")
+        if (tone === "error")
+            return Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.34)
+        if (tone === "accent")
+            return Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.34)
+        if (tone === "primary")
+            return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.34)
+        return Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.36)
+    }
+
+    function _malBadgeTextColor(badge) {
+        var tone = String(badge?.tone || "")
+        if (tone === "error")
+            return Color.mError
+        if (tone === "accent")
+            return Color.mTertiary
+        if (tone === "primary")
+            return Color.mPrimary
+        return Color.mOnSurfaceVariant
+    }
+
     function openSearch() {
         librarySearchBar.visible = true
         librarySearchField.forceActiveFocus()
+    }
+
+    function toggleSearch() {
+        librarySearchBar.visible = !librarySearchBar.visible
+        if (librarySearchBar.visible)
+            librarySearchField.forceActiveFocus()
+        else
+            libraryView.closeSearch()
     }
 
     function closeSearch() {
@@ -285,6 +365,7 @@ Item {
                         color: Color.mOnSurface
                         font.pixelSize: 13
                         clip: true
+                        selectByMouse: true
                         onTextChanged: libraryView.librarySearchQuery = text
                         Keys.onEscapePressed: {
                             libraryView.closeSearch()
@@ -356,75 +437,17 @@ Item {
                     }
                 }
 
-                Item {
-                    width: 38; height: 38
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 32; height: 32; radius: 16
-                        color: (librarySearchBar.visible || librarySearchToggleArea.containsMouse)
-                            ? Color.mPrimaryContainer
-                            : "transparent"
-                        border.width: librarySearchToggleArea.containsMouse ? 1 : 0
-                        border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.25)
-                        scale: librarySearchToggleArea.containsMouse ? 1.06 : 1.0
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.width { NumberAnimation { duration: 180 } }
-                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⌕"; font.pixelSize: 18
-                        color: (librarySearchBar.visible || librarySearchToggleArea.containsMouse)
-                            ? Color.mOnPrimaryContainer
-                            : Color.mOnSurfaceVariant
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                    }
-                    MouseArea {
-                        id: librarySearchToggleArea
-                        anchors.fill: parent
-                        z: 1
-                        hoverEnabled: true
-                        onClicked: {
-                            librarySearchBar.visible = !librarySearchBar.visible
-                            if (librarySearchBar.visible) librarySearchField.forceActiveFocus()
-                            else libraryView.closeSearch()
-                        }
-                    }
+                HoverIconButton {
+                    text: "⌕"
+                    iconPixelSize: 18
+                    selected: librarySearchBar.visible
+                    onClicked: libraryView.toggleSearch()
                 }
 
-                Item {
-                    width: 38; height: 38
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 32; height: 32; radius: 16
-                        color: settingsArea.containsMouse
-                            ? Color.mPrimaryContainer
-                            : "transparent"
-                        border.width: settingsArea.containsMouse ? 1 : 0
-                        border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.25)
-                        scale: settingsArea.containsMouse ? 1.06 : 1.0
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.width { NumberAnimation { duration: 180 } }
-                        Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⚙"
-                        font.pixelSize: 15
-                        color: settingsArea.containsMouse
-                            ? Color.mOnPrimaryContainer
-                            : Color.mOnSurfaceVariant
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                    }
-                    MouseArea {
-                        id: settingsArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: libraryView.settingsRequested()
-                    }
+                HoverIconButton {
+                    text: "⚙"
+                    iconPixelSize: 15
+                    onClicked: libraryView.settingsRequested()
                 }
             }
         }
@@ -432,8 +455,8 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             visible: (anime?.libraryList?.length ?? 0) > 0
-            readonly property bool singleRowLayout: width >= 920
-            implicitHeight: filterColumn.implicitHeight + 20
+            readonly property bool singleRowLayout: width >= 980
+            implicitHeight: filterWrap.implicitHeight + 22
             height: visible ? implicitHeight : 0
             color: "transparent"
             clip: true
@@ -446,150 +469,160 @@ Item {
             }
 
             Column {
-                id: filterColumn
+                id: filterWrap
                 anchors {
                     top: parent.top
                     left: parent.left
                     right: parent.right
                     leftMargin: 16
                     rightMargin: 16
-                    topMargin: 10
+                    topMargin: 11
                 }
-                spacing: 8
+                spacing: 10
 
-                Row {
+                Rectangle {
                     width: parent.width
-                    spacing: 8
+                    radius: 20
+                    color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.52)
+                    border.width: 1
+                    border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.16)
+                    implicitHeight: filtersColumn.implicitHeight + 24
 
-                    Text {
-                        id: filtersTitleText
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Filters"
-                        font.pixelSize: 11
-                        font.bold: true
-                        font.letterSpacing: 0.8
-                        color: Color.mOnSurface
-                        opacity: 0.9
-                    }
+                    Column {
+                        id: filtersColumn
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
 
-                    Item {
-                        width: Math.max(
-                            0,
-                            parent.width
-                                - filtersTitleText.implicitWidth
-                                - (libraryView.hasActiveFilters ? resetFiltersChip.implicitWidth : 0)
-                                - parent.spacing
-                        )
-                        height: 1
-                    }
-
-                    ActionChip {
-                        id: resetFiltersChip
-                        visible: libraryView.hasActiveFilters
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "Reset"
-                        controlHeight: 24
-                        horizontalPadding: 10
-                        fontPixelSize: 9
-                        letterSpacing: 0.5
-                        boldLabel: false
-                        onClicked: libraryView.resetFilters()
-                    }
-                }
-
-                Flow {
-                    width: parent.width
-                    spacing: 10
-
-                    Item {
-                        width: parent.parent.parent.singleRowLayout
-                            ? Math.floor((parent.width - parent.spacing) * 0.58)
-                            : parent.width
-                        height: progressCard.implicitHeight
-
-                        Rectangle {
-                            id: progressCard
+                        RowLayout {
                             width: parent.width
-                            implicitHeight: progressColumn.implicitHeight + 20
-                            radius: 18
-                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.52)
-                            border.width: 1
-                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                            spacing: 10
 
-                            Column {
-                                id: progressColumn
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 8
+                            Rectangle {
+                                implicitWidth: filterLabel.implicitWidth + 20
+                                implicitHeight: 24
+                                radius: 12
+                                color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.24)
 
                                 Text {
-                                    text: "Progress"
+                                    id: filterLabel
+                                    anchors.centerIn: parent
+                                    text: "Library Filters"
                                     font.pixelSize: 10
                                     font.bold: true
-                                    font.letterSpacing: 0.7
-                                    color: Color.mOnSurfaceVariant
-                                    opacity: 0.8
+                                    font.letterSpacing: 0.6
+                                    color: Color.mPrimary
                                 }
+                            }
 
-                                Flow {
-                                    width: parent.width
+                            Text {
+                                Layout.fillWidth: true
+                                text: libraryView._activeFilterSummary()
+                                font.pixelSize: 11
+                                color: Color.mOnSurfaceVariant
+                                opacity: 0.84
+                                elide: Text.ElideRight
+                            }
+
+                            ActionChip {
+                                visible: libraryView.hasActiveFilters
+                                text: "Reset"
+                                controlHeight: 26
+                                horizontalPadding: 11
+                                fontPixelSize: 9
+                                letterSpacing: 0.5
+                                boldLabel: false
+                                onClicked: libraryView.resetFilters()
+                            }
+                        }
+
+                        Flow {
+                            width: parent.width
+                            spacing: 10
+
+                            Rectangle {
+                                width: parent.parent.parent.singleRowLayout
+                                    ? Math.floor((parent.width - parent.spacing) * 0.58)
+                                    : parent.width
+                                radius: 16
+                                color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                                implicitHeight: progressColumn.implicitHeight + 18
+
+                                Column {
+                                    id: progressColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 9
                                     spacing: 8
 
-                                    Repeater {
-                                        model: libraryView.progressFilterOptions
+                                    Text {
+                                        text: "Progress"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.letterSpacing: 0.7
+                                        color: Color.mOnSurfaceVariant
+                                        opacity: 0.82
+                                    }
 
-                                        delegate: ChoiceChip {
-                                            text: modelData.label
-                                            selected: libraryView.progressFilter === modelData.key
-                                            onClicked: libraryView.progressFilter = modelData.key
+                                    Flow {
+                                        width: parent.width
+                                        spacing: 8
+
+                                        Repeater {
+                                            model: libraryView.progressFilterOptions
+
+                                            delegate: ChoiceChip {
+                                                text: modelData.label
+                                                selected: libraryView.progressFilter === modelData.key
+                                                fontPixelSize: 11
+                                                onClicked: libraryView.progressFilter = modelData.key
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    Item {
-                        width: parent.parent.parent.singleRowLayout
-                            ? (parent.width - Math.floor((parent.width - parent.spacing) * 0.58) - parent.spacing)
-                            : parent.width
-                        height: typeCard.implicitHeight
+                            Rectangle {
+                                width: parent.parent.parent.singleRowLayout
+                                    ? (parent.width - Math.floor((parent.width - parent.spacing) * 0.58) - parent.spacing)
+                                    : parent.width
+                                radius: 16
+                                color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+                                implicitHeight: typeColumn.implicitHeight + 18
 
-                        Rectangle {
-                            id: typeCard
-                            width: parent.width
-                            implicitHeight: typeColumn.implicitHeight + 20
-                            radius: 18
-                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.52)
-                            border.width: 1
-                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
-
-                            Column {
-                                id: typeColumn
-                                anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 8
-
-                                Text {
-                                    text: "Type"
-                                    font.pixelSize: 10
-                                    font.bold: true
-                                    font.letterSpacing: 0.7
-                                    color: Color.mOnSurfaceVariant
-                                    opacity: 0.8
-                                }
-
-                                Flow {
-                                    width: parent.width
+                                Column {
+                                    id: typeColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 9
                                     spacing: 8
 
-                                    Repeater {
-                                        model: libraryView.typeFilterOptions
+                                    Text {
+                                        text: "Type"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        font.letterSpacing: 0.7
+                                        color: Color.mOnSurfaceVariant
+                                        opacity: 0.82
+                                    }
 
-                                        delegate: ChoiceChip {
-                                            text: modelData.label
-                                            selected: libraryView.typeFilter === modelData.key
-                                            onClicked: libraryView.typeFilter = modelData.key
+                                    Flow {
+                                        width: parent.width
+                                        spacing: 8
+
+                                        Repeater {
+                                            model: libraryView.typeFilterOptions
+
+                                            delegate: ChoiceChip {
+                                                text: modelData.label
+                                                selected: libraryView.typeFilter === modelData.key
+                                                fontPixelSize: 11
+                                                onClicked: libraryView.typeFilter = modelData.key
+                                            }
                                         }
                                     }
                                 }
@@ -771,6 +804,8 @@ Item {
                         height: libGrid.cellHeight
 
                         readonly property var entry: modelData
+                        readonly property int progressCount: libraryView._entryProgressCount(entry)
+                        readonly property var progressState: libraryView._entryProgressState(entry)
                         readonly property real activeProgressRatio: {
                             if (!anime || !entry.lastWatchedEpNum) return 0
                             return anime.getEpisodeProgressRatio(entry.id, entry.lastWatchedEpNum)
@@ -779,8 +814,11 @@ Item {
                         Rectangle {
                             id: libCard
                             anchors { fill: parent; margins: 5 }
-                            radius: 10; color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.45)
+                            radius: 10
+                            color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.45)
                             clip: true
+                            readonly property var malBadge: anime?.malSyncBadge(entry, true)
+                                || ({ visible: false, label: "", detail: "", tone: "muted" })
 
                             // Cover
                             Rectangle {
@@ -817,20 +855,97 @@ Item {
                                         }
                                     }
 
-                                    // Score badge
+                                    Column {
+                                        anchors {
+                                            top: parent.top
+                                            left: parent.left
+                                            topMargin: 6
+                                            leftMargin: 6
+                                        }
+                                        spacing: 4
+
+                                        Rectangle {
+                                            visible: entry.score != null
+                                            height: 18
+                                            radius: 9
+                                            width: libScoreText.implicitWidth + 10
+                                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+                                            border.width: 1
+                                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+
+                                            Text {
+                                                id: libScoreText
+                                                anchors.centerIn: parent
+                                                text: entry.score ? "★ " + (entry.score).toFixed(1) : ""
+                                                font.pixelSize: 8
+                                                font.bold: true
+                                                color: Color.mPrimary
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            visible: libCard.malBadge?.visible ?? false
+                                            height: 18
+                                            radius: 9
+                                            width: libMalText.implicitWidth + 10
+                                            color: libraryView._malBadgeFill(libCard.malBadge)
+                                            border.width: 1
+                                            border.color: libraryView._malBadgeBorder(libCard.malBadge)
+
+                                            Text {
+                                                id: libMalText
+                                                anchors.centerIn: parent
+                                                text: libCard.malBadge?.label || ""
+                                                font.pixelSize: 8
+                                                font.bold: true
+                                                color: libraryView._malBadgeTextColor(libCard.malBadge)
+                                            }
+
+                                            MouseArea {
+                                                id: libMalArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                acceptedButtons: Qt.NoButton
+                                            }
+
+                                            StyledToolTip {
+                                                target: libMalArea
+                                                shown: libMalArea.containsMouse
+                                                above: false
+                                                text: libCard.malBadge?.detail || ""
+                                            }
+                                        }
+                                    }
+
                                     Rectangle {
-                                        visible: entry.score != null
-                                        anchors { top: parent.top; left: parent.left; topMargin: 6; leftMargin: 6 }
-                                        height: 18; radius: 9; width: libScoreText.implicitWidth + 10
-                                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+                                        visible: progressState.key !== "not-started"
+                                        anchors { top: parent.top; right: parent.right; topMargin: 6; rightMargin: 6 }
+                                        height: 18
+                                        width: statusText.implicitWidth + 12
+                                        radius: 9
+                                        color: progressState.key === "completed"
+                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.92)
+                                            : (progressState.key === "up-to-date"
+                                                ? Qt.rgba(Color.mSecondary.r, Color.mSecondary.g, Color.mSecondary.b, 0.9)
+                                                : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88))
                                         border.width: 1
-                                        border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.38)
+                                        border.color: progressState.key === "completed"
+                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.95)
+                                            : (progressState.key === "up-to-date"
+                                                ? Qt.rgba(Color.mSecondary.r, Color.mSecondary.g, Color.mSecondary.b, 0.95)
+                                                : Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.42))
 
                                         Text {
-                                            id: libScoreText; anchors.centerIn: parent
-                                            text: entry.score ? "★ " + (entry.score).toFixed(1) : ""
-                                            font.pixelSize: 8; font.bold: true
-                                            color: Color.mPrimary
+                                            id: statusText
+                                            anchors.centerIn: parent
+                                            text: progressState.label
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            color: progressState.key === "completed"
+                                                ? Color.mOnPrimary
+                                                : (progressState.key === "up-to-date"
+                                                    ? Color.mOnSecondary
+                                                    : Color.mOnSurface)
                                         }
                                     }
 
@@ -905,7 +1020,7 @@ Item {
                                     }
 
                                     Rectangle {
-                                        visible: (entry.watchedEpisodes || []).length > 0
+                                        visible: progressCount > 0
                                         anchors.verticalCenter: parent.verticalCenter
                                         height: 14; radius: 7
                                         width: watchedCountText.implicitWidth + 8
@@ -914,7 +1029,7 @@ Item {
                                         Text {
                                             id: watchedCountText
                                             anchors.centerIn: parent
-                                            text: "✓ " + (entry.watchedEpisodes || []).length
+                                            text: "✓ " + progressCount
                                             font.pixelSize: 8; font.bold: true
                                             color: Color.mPrimary
                                         }

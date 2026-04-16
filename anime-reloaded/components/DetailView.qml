@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import qs.Commons
+import qs.Widgets
 
 Item {
     id: detailView
@@ -133,6 +134,40 @@ Item {
         wheel.accepted = true
     }
 
+    function _malBadgeFill(badge) {
+        var tone = String(badge?.tone || "")
+        var base = Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.94)
+        if (tone === "error")
+            return Qt.tint(base, Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18))
+        if (tone === "accent")
+            return Qt.tint(base, Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.18))
+        if (tone === "primary")
+            return Qt.tint(base, Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18))
+        return Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.92)
+    }
+
+    function _malBadgeBorder(badge) {
+        var tone = String(badge?.tone || "")
+        if (tone === "error")
+            return Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.34)
+        if (tone === "accent")
+            return Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.34)
+        if (tone === "primary")
+            return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.34)
+        return Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.36)
+    }
+
+    function _malBadgeTextColor(badge) {
+        var tone = String(badge?.tone || "")
+        if (tone === "error")
+            return Color.mError
+        if (tone === "accent")
+            return Color.mTertiary
+        if (tone === "primary")
+            return Color.mPrimary
+        return Color.mOnSurfaceVariant
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -246,6 +281,9 @@ Item {
                 readonly property var episodeList: anime?.currentAnime?.episodes || []
                 readonly property var watchAction: anime?.currentAnime
                     ? anime.getShowWatchAction(anime.currentAnime) : null
+                readonly property var malBadge: anime?.currentAnime
+                    ? anime.malSyncBadge(anime.currentAnime, false)
+                    : ({ visible: false, label: "", detail: "", tone: "muted" })
                 readonly property int lastWatchedIndex: {
                     if (!libraryEntry || !episodeList.length) return -1
                     for (var i = 0; i < episodeList.length; i++) {
@@ -342,6 +380,65 @@ Item {
                                 detailMetaFlow.parent.libraryEntry.lastWatchedEpNum || "",
                                 detailMetaFlow.parent.lastWatchedIndex
                             )
+                        }
+                    }
+
+                    Rectangle {
+                        visible: detailMetaFlow.parent.malBadge?.visible ?? false
+                        height: 20
+                        width: malBadgeText.implicitWidth + 18
+                        radius: 10
+                        color: detailView._malBadgeFill(detailMetaFlow.parent.malBadge)
+                        border.color: detailView._malBadgeBorder(detailMetaFlow.parent.malBadge)
+                        border.width: 1
+
+                        Text {
+                            id: malBadgeText
+                            anchors.centerIn: parent
+                            text: detailMetaFlow.parent.malBadge?.label || ""
+                            font.pixelSize: 9
+                            font.bold: true
+                            font.letterSpacing: 0.8
+                            color: detailView._malBadgeTextColor(detailMetaFlow.parent.malBadge)
+                        }
+
+                        MouseArea {
+                            id: malBadgeArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                        }
+
+                        StyledToolTip {
+                            target: malBadgeArea
+                            shown: malBadgeArea.containsMouse
+                            above: false
+                            text: detailMetaFlow.parent.malBadge?.detail || ""
+                        }
+                    }
+
+                    ActionChip {
+                        visible: (anime?.malSync?.enabled ?? false)
+                            && anime?.currentAnime != null
+                            && String(anime?._showMalId(anime.currentAnime) || "").length > 0
+                        text: "Remove MAL"
+                        controlHeight: 22
+                        horizontalPadding: 11
+                        fontPixelSize: 9
+                        letterSpacing: 0.6
+                        baseColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.1)
+                        hoverColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+                        activeColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+                        baseBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.24)
+                        hoverBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.42)
+                        activeBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.42)
+                        baseTextColor: Color.mError
+                        hoverTextColor: Color.mError
+                        activeTextColor: Color.mError
+                        activeHoverTextColor: Color.mError
+                        onClicked: {
+                            if (!anime?.currentAnime) return
+                            anime.removeShowFromMal(anime.currentAnime, true)
                         }
                     }
 

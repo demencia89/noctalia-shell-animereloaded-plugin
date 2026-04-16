@@ -12,8 +12,10 @@ New usage:
   python3 provider_cli.py metadata <provider> feed <library_json_path> <sub|dub> [cache_json_path] [mapping_cache] [stream_provider]
   python3 provider_cli.py stream <provider> resolve <show_id> <episode_number> <sub|dub> [mirror_pref] [quality_pref] [mapping_cache] [metadata_provider]
   python3 provider_cli.py sync myanimelist auth-url <config_json_path>
+  python3 provider_cli.py sync myanimelist listen-exchange <config_json_path> [timeout_seconds]
   python3 provider_cli.py sync myanimelist exchange <config_json_path> <authorization_code>
   python3 provider_cli.py sync myanimelist refresh <config_json_path>
+  python3 provider_cli.py sync myanimelist delete-entry <config_json_path> <mal_id> [title]
   python3 provider_cli.py sync myanimelist push <config_json_path> <library_json_path>
   python3 provider_cli.py sync myanimelist pull <config_json_path> <library_json_path>
 
@@ -203,8 +205,19 @@ def _run_sync_command(args):
         _print_json(mal_sync.exchange_code(config, code))
         return
 
+    if command == "listen-exchange":
+        timeout_seconds = int(args[4]) if len(args) > 4 else 240
+        _print_json(mal_sync.await_browser_login(config, timeout_seconds))
+        return
+
     if command == "refresh":
         _print_json(mal_sync.refresh_session(config))
+        return
+
+    if command == "delete-entry":
+        mal_id = args[4] if len(args) > 4 else ""
+        title = args[5] if len(args) > 5 else ""
+        _print_json(mal_sync.remove_anime_entry(config, mal_id, title))
         return
 
     library_path = args[4] if len(args) > 4 else ""

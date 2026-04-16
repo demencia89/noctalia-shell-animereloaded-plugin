@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 API = "https://graphql.anilist.co"
-AGENT = "AnimeReloaded/2.1"
+AGENT = "AnimeReloaded/3.0"
 _CACHE_PATH = Path(__file__).resolve().parent.parent / "anime-reloaded-anilist-cache.json"
 _CACHE_VERSION = 1
 _MAX_CACHE_ENTRIES = 512

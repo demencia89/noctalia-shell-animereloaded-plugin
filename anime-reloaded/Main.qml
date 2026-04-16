@@ -93,10 +93,11 @@ Item {
             version: 1,
             enabled: false,
             autoPush: false,
-            clientId: "",
+            clientId: "831f9123c7e50037ce8c395ac713fff2",
             clientSecret: "",
-            redirectUri: "",
+            redirectUri: "http://127.0.0.1:8787/animereloaded",
             codeVerifier: "",
+            authState: "",
             authUrl: "",
             accessToken: "",
             refreshToken: "",
@@ -116,10 +117,11 @@ Item {
         config.version = 1
         config.enabled = config.enabled === true
         config.autoPush = config.autoPush === true
-        config.clientId = String(config.clientId || "")
+        config.clientId = String(config.clientId || "831f9123c7e50037ce8c395ac713fff2")
         config.clientSecret = String(config.clientSecret || "")
-        config.redirectUri = String(config.redirectUri || "")
+        config.redirectUri = String(config.redirectUri || "http://127.0.0.1:8787/animereloaded")
         config.codeVerifier = String(config.codeVerifier || "")
+        config.authState = String(config.authState || "")
         config.authUrl = String(config.authUrl || "")
         config.accessToken = String(config.accessToken || "")
         config.refreshToken = String(config.refreshToken || "")
@@ -175,6 +177,7 @@ Item {
         var next = _normaliseMalSync(malSync)
         next.enabled = false
         next.codeVerifier = ""
+        next.authState = ""
         next.authUrl = ""
         next.accessToken = ""
         next.refreshToken = ""
@@ -187,6 +190,57 @@ Item {
         updateMalSyncConfig(next)
         malSyncError = ""
         malSyncMessage = "Disconnected from MyAnimeList."
+        malSyncSummary = ({})
+        malSyncResults = []
+        _pendingMalBrowserAuth = false
+        _pendingMalBrowserAuthUrl = ""
+    }
+
+    function _entryCountLabel(count) {
+        var value = Number(count || 0)
+        return String(value) + " entr" + (value === 1 ? "y" : "ies")
+    }
+
+    function _formatMalSyncMessage(direction, summary) {
+        var info = summary || ({})
+        var updated = Number(info.updated || 0)
+        var imported = Number(info.imported || 0)
+        var removed = Number(info.removed || 0)
+        var skipped = Number(info.skipped || 0)
+        var failed = Number(info.failed || 0)
+        var suffix = ""
+        if (skipped > 0 || failed > 0) {
+            var parts = []
+            if (skipped > 0)
+                parts.push(String(skipped) + " skipped")
+            if (failed > 0)
+                parts.push(String(failed) + " failed")
+            suffix = " " + parts.join(", ") + "."
+        }
+
+        if (direction === "push") {
+            if (updated <= 0 && failed <= 0)
+                return "MyAnimeList is already in sync." + suffix
+            return "Pushed " + _entryCountLabel(updated) + " to MyAnimeList." + suffix
+        }
+
+        if (direction === "pull") {
+            if (updated <= 0 && imported <= 0 && failed <= 0)
+                return "MyAnimeList is already in sync." + suffix
+            if (updated > 0 && imported > 0)
+                return "Pulled " + _entryCountLabel(updated) + " and imported " + _entryCountLabel(imported) + " from MyAnimeList." + suffix
+            if (imported > 0)
+                return "Imported " + _entryCountLabel(imported) + " from MyAnimeList." + suffix
+            return "Pulled " + _entryCountLabel(updated) + " from MyAnimeList." + suffix
+        }
+
+        if (direction === "delete") {
+            if (removed <= 0 && failed <= 0)
+                return "MyAnimeList entry was not removed." + suffix
+            return "Removed " + _entryCountLabel(removed) + " from MyAnimeList." + suffix
+        }
+
+        return "MyAnimeList sync completed." + suffix
     }
 
     function _feedMediaId(item) {
@@ -336,6 +390,194 @@ Item {
         return String(show?.providerRefs?.stream?.provider || streamProviderId || "allanime")
     }
 
+    function _showTitle(show) {
+        return String(show?.englishName || show?.name || "Untitled")
+    }
+
+    function _showMalId(show) {
+        var syncRef = show?.providerRefs?.sync
+        if (String(syncRef?.provider || "") === "myanimelist" && String(syncRef?.id || "").length > 0)
+            return String(syncRef.id)
+        if (String(show?.malId || "").length > 0)
+            return String(show.malId)
+        return ""
+    }
+
+    function _findMalSyncResult(show) {
+        var malId = _showMalId(show)
+        var metadataId = _showMetadataId(show)
+        var results = malSyncResults || []
+        for (var i = 0; i < results.length; i++) {
+            var item = results[i] || ({})
+            if (malId.length > 0 && String(item.malId || "") === malId)
+                return item
+            if (metadataId.length > 0 && String(item.id || "") === metadataId)
+                return item
+        }
+        return null
+    }
+
+    function _malListStatusLabel(value) {
+        var status = String(value || "").trim().toLowerCase()
+        if (status === "plan_to_watch")
+            return "Plan To Watch"
+        if (status === "watching")
+            return "Watching"
+        if (status === "completed")
+            return "Completed"
+        if (status === "on_hold")
+            return "On Hold"
+        if (status === "dropped")
+            return "Dropped"
+        return ""
+    }
+
+    function _malResultFacts(result) {
+        var parts = []
+        var watched = Number(result?.watchedEpisodes || 0)
+        var remoteStatus = _malListStatusLabel(result?.remoteStatus)
+        if (remoteStatus.length > 0)
+            parts.push("Status: " + remoteStatus + ".")
+        if (watched > 0)
+            parts.push("Watched on MAL: " + watched + " episode" + (watched === 1 ? "" : "s") + ".")
+        return parts.join(" ")
+    }
+
+    function _malResultDetail(baseDetail, result) {
+        var facts = _malResultFacts(result)
+        if (facts.length === 0)
+            return String(baseDetail || "")
+        return String(baseDetail || "") + " " + facts
+    }
+
+    function _showLocalWatchedEpisodes(show) {
+        var watched = Number(show?.lastWatchedEpNum || 0)
+        var watchedEpisodes = show?.watchedEpisodes
+        if (Array.isArray(watchedEpisodes))
+            watched = Math.max(watched, watchedEpisodes.length)
+        return watched
+    }
+
+    function _malSyncBadgeData(show, compact, includeWhenDisconnected) {
+        var isCompact = compact === true
+        if (!_malSyncReady() && includeWhenDisconnected !== true) {
+            return {
+                visible: false,
+                key: "disabled",
+                tone: "muted",
+                label: "",
+                detail: ""
+            }
+        }
+
+        var malId = _showMalId(show)
+        if (malId.length === 0) {
+            return {
+                visible: true,
+                key: "unmapped",
+                tone: "muted",
+                label: isCompact ? "MAL ?" : "MAL Unmapped",
+                detail: "No MyAnimeList mapping is available for this title yet."
+            }
+        }
+
+        var result = _findMalSyncResult(show)
+        if (!result) {
+            return {
+                visible: true,
+                key: "linked",
+                tone: "primary",
+                label: isCompact ? "MAL" : "MAL Ready",
+                detail: "Mapped to MyAnimeList and ready for pull, push, or removal."
+            }
+        }
+
+        var status = String(result.status || "").toLowerCase()
+        if (status === "error") {
+            return {
+                visible: true,
+                key: "error",
+                tone: "error",
+                label: isCompact ? "MAL !" : "MAL Error",
+                detail: String(result.reason || "The latest MyAnimeList sync failed for this title.")
+            }
+        }
+        if (status === "skipped") {
+            return {
+                visible: true,
+                key: "skipped",
+                tone: "muted",
+                label: isCompact ? "MAL -" : "MAL Skipped",
+                detail: String(result.reason || "The latest MyAnimeList sync skipped this title.")
+            }
+        }
+        if (status === "removed") {
+            return {
+                visible: true,
+                key: "removed",
+                tone: "error",
+                label: isCompact ? "MAL x" : "Removed From MAL",
+                detail: "This title was removed from your MyAnimeList list in the latest sync action."
+            }
+        }
+        if (status === "imported") {
+            return {
+                visible: true,
+                key: "imported",
+                tone: "accent",
+                label: isCompact ? "MAL +" : "Imported From MAL",
+                detail: _malResultDetail(
+                    "This title was imported from your MyAnimeList list.",
+                    result
+                )
+            }
+        }
+        return {
+            visible: true,
+            key: "synced",
+            tone: "primary",
+            label: isCompact ? "MAL ✓" : "MAL Synced",
+            detail: _malResultDetail(
+                status === "updated"
+                    ? "The latest MyAnimeList sync updated this title successfully."
+                    : "The latest MyAnimeList sync found this title already aligned.",
+                result
+            )
+        }
+    }
+
+    function malSyncBadge(show, compact) {
+        return _malSyncBadgeData(show, compact, false)
+    }
+
+    function malSyncStatusEntry(show) {
+        var entry = show || ({})
+        var badge = _malSyncBadgeData(entry, false, true)
+        var result = _findMalSyncResult(entry)
+        var watched = _showLocalWatchedEpisodes(entry)
+        var total = Number(entry?.episodeCount || 0)
+        var remoteStatus = _malListStatusLabel(result?.remoteStatus)
+        var remoteWatched = Number(result?.watchedEpisodes || 0)
+        var localProgress = watched > 0
+            ? ("Local: " + watched + (total > 0 ? " / " + total : "") + " episodes")
+            : (total > 0 ? ("Local: 0 / " + total + " episodes") : "Local: not started")
+
+        return {
+            id: String(entry?.id || ""),
+            metadataId: _showMetadataId(entry),
+            title: _showTitle(entry),
+            malId: _showMalId(entry),
+            badge: badge,
+            badgeKey: String(badge?.key || "disabled"),
+            badgeTone: String(badge?.tone || "muted"),
+            localProgress: localProgress,
+            remoteStatus: remoteStatus,
+            remoteWatchedEpisodes: remoteWatched,
+            hasSyncResult: result !== null,
+            detail: String(badge?.detail || "")
+        }
+    }
+
     function _metadataCommand(command, args, providerId) {
         return ["python3", scriptPath, "metadata", providerId || metadataProviderId, command].concat(args || [])
     }
@@ -450,10 +692,15 @@ Item {
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
     property string malSyncMessage: ""
+    property var    malSyncSummary: ({})
+    property var    malSyncResults: []
     property string malSyncAuthCode: ""
+    property bool   malSyncShowAdvanced: false
     property string _pendingMalCommand: ""
     property bool   _pendingMalShowsToast: true
     property bool   _suppressMalAutoPush: false
+    property bool   _pendingMalBrowserAuth: false
+    property string _pendingMalBrowserAuthUrl: ""
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -1311,6 +1558,17 @@ Item {
     }
 
     Process {
+        id: malBrowserWriteProc
+        property var _nextCommand: []
+        property string _authUrl: ""
+
+        onRunningChanged: {
+            if (running) return
+            root._runPreparedMalBrowserCommand(_nextCommand, _authUrl)
+        }
+    }
+
+    Process {
         id: malProc
         property string _buf: ""
 
@@ -1323,36 +1581,51 @@ Item {
                 if (d.error) {
                     root.malSyncError = d.error
                     root.malSyncMessage = ""
+                    root._pendingMalBrowserAuth = false
+                    root._pendingMalBrowserAuthUrl = ""
                     _buf = ""
                     return
                 }
                 if (d.config)
                     root.updateMalSyncConfig(d.config)
-                if (root._pendingMalCommand === "pull" && Array.isArray(d.library)) {
+                root.malSyncSummary = d.summary || ({})
+                root.malSyncResults = Array.isArray(d.results) ? d.results : []
+                if ((root._pendingMalCommand === "pull" || root._pendingMalCommand === "push") && Array.isArray(d.library)) {
                     root._suppressMalAutoPush = true
                     root.libraryList = d.library.map(function(entry) {
                         return root._normaliseLibraryEntry(entry)
                     })
                     root._saveLibrary(true)
                     root._suppressMalAutoPush = false
-                    root.fetchFollowingFeed(true)
+                    if (root._pendingMalCommand === "pull")
+                        root.fetchFollowingFeed(true)
                 }
 
                 var summary = d.summary || ({})
                 if (root._pendingMalCommand === "auth-url" && d.authUrl) {
-                    root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
-                    Qt.openUrlExternally(d.authUrl)
+                    if (root._pendingMalBrowserAuth) {
+                        root.malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
+                        root._queueMalBrowserListener(d.authUrl)
+                    } else {
+                        root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
+                        Qt.openUrlExternally(d.authUrl)
+                    }
                 } else if (root._pendingMalCommand === "exchange") {
                     root.malSyncAuthCode = ""
                     root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
                 } else if (root._pendingMalCommand === "refresh") {
                     root.malSyncMessage = "Refreshed MyAnimeList session."
+                } else if (root._pendingMalCommand === "delete-entry") {
+                    var removedTitle = String((d?.results && d.results.length > 0 ? d.results[0]?.title : "") || "")
+                    root.malSyncMessage = removedTitle.length > 0
+                        ? ("Removed " + removedTitle + " from MyAnimeList.")
+                        : root._formatMalSyncMessage("delete", summary)
                 } else if (root._pendingMalCommand === "push") {
-                    root.malSyncMessage = "Pushed " + Number(summary.updated || 0) + " library entr" + (Number(summary.updated || 0) === 1 ? "y" : "ies") + " to MyAnimeList."
+                    root.malSyncMessage = root._formatMalSyncMessage("push", summary)
                 } else if (root._pendingMalCommand === "pull") {
-                    root.malSyncMessage = "Pulled " + Number(summary.updated || 0) + " updated entr" + (Number(summary.updated || 0) === 1 ? "y" : "ies") + " from MyAnimeList."
+                    root.malSyncMessage = root._formatMalSyncMessage("pull", summary)
                 } else {
-                    root.malSyncMessage = "MyAnimeList sync completed."
+                    root.malSyncMessage = root._formatMalSyncMessage("", summary)
                 }
                 root.malSyncError = ""
 
@@ -1366,8 +1639,11 @@ Item {
                 }
             } catch(e) {
                 root.malSyncError = "Parse error: " + e
+                root._pendingMalBrowserAuth = false
+                root._pendingMalBrowserAuthUrl = ""
                 Logger.w("AnimeReloaded", "myanimelist sync parse error:", e)
             }
+            root._pendingMalCommand = ""
             _buf = ""
         }
 
@@ -1377,6 +1653,52 @@ Item {
         stderr: SplitParser {
             onRead: function(data) {
                 if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist:", data)
+            }
+        }
+    }
+
+    Process {
+        id: malBrowserProc
+        property string _buf: ""
+
+        onRunningChanged: {
+            if (running) return
+            root.isMalSyncBusy = false
+            root._pendingMalBrowserAuth = false
+            root._pendingMalBrowserAuthUrl = ""
+            if (_buf.length === 0) return
+            try {
+                var d = JSON.parse(_buf)
+                if (d.error) {
+                    root.malSyncError = d.error
+                    root.malSyncMessage = ""
+                    _buf = ""
+                    return
+                }
+                if (d.config)
+                    root.updateMalSyncConfig(d.config)
+                root.malSyncAuthCode = ""
+                root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
+                root.malSyncError = ""
+                ToastService.showNotice(
+                    "AnimeReloaded",
+                    root.malSyncMessage,
+                    "device-tv",
+                    3200
+                )
+            } catch(e) {
+                root.malSyncError = "Parse error: " + e
+                Logger.w("AnimeReloaded", "myanimelist browser auth parse error:", e)
+            }
+            _buf = ""
+        }
+
+        stdout: SplitParser {
+            onRead: function(data) { malBrowserProc._buf += data }
+        }
+        stderr: SplitParser {
+            onRead: function(data) {
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist browser auth:", data)
             }
         }
     }
@@ -1582,6 +1904,24 @@ Item {
         }
     }
 
+    function _runPreparedMalBrowserCommand(commandArgs, authUrl) {
+        malBrowserProc._buf = ""
+        malBrowserProc.command = commandArgs
+        isMalSyncBusy = true
+        malSyncError = ""
+        malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
+        if (malBrowserProc.running) {
+            malBrowserProc.running = false
+            Qt.callLater(function() {
+                malBrowserProc.running = true
+                Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
+            })
+        } else {
+            malBrowserProc.running = true
+            Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
+        }
+    }
+
     function _queueMalCommand(command, includeLibrary, extraArgs, showToast) {
         _pendingMalCommand = String(command || "")
         _pendingMalShowsToast = showToast !== false
@@ -1621,8 +1961,43 @@ Item {
         }
     }
 
+    function _queueMalBrowserListener(authUrl) {
+        _pendingMalBrowserAuthUrl = String(authUrl || "")
+        var configPayload = JSON.stringify(_normaliseMalSync(malSync))
+        malBrowserWriteProc._authUrl = _pendingMalBrowserAuthUrl
+        malBrowserWriteProc._nextCommand = _syncCommand("listen-exchange", [])
+        malBrowserWriteProc.command = [
+            "sh", "-c",
+            "printf '%s' \"$1\" > \"$2\"",
+            "sh",
+            configPayload,
+            malConfigPath
+        ]
+
+        isMalSyncBusy = true
+        if (malBrowserWriteProc.running) {
+            malBrowserWriteProc.running = false
+            Qt.callLater(function() { malBrowserWriteProc.running = true })
+        } else {
+            malBrowserWriteProc.running = true
+        }
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
+    function startMalBrowserAuth() {
+        if (String(malSync?.clientId || "").trim().length === 0) {
+            malSyncError = "MyAnimeList is not configured yet."
+            return
+        }
+        _pendingMalBrowserAuth = true
+        malSyncError = ""
+        malSyncMessage = "Preparing MyAnimeList sign-in..."
+        _queueMalCommand("auth-url", false, [], false)
+    }
+
     function startMalAuth() {
+        _pendingMalBrowserAuth = false
+        _pendingMalBrowserAuthUrl = ""
         if (String(malSync?.clientId || "").trim().length === 0) {
             malSyncError = "MyAnimeList client id is required before connecting."
             return
@@ -1660,15 +2035,25 @@ Item {
     }
 
     function pullMalSync(showToast) {
-        if ((libraryList || []).length === 0) {
-            malSyncError = "Your library is empty."
-            return
-        }
         if (!_malSyncReady()) {
             malSyncError = "Connect MyAnimeList before pulling progress."
             return
         }
         _queueMalCommand("pull", true, [], showToast !== false)
+    }
+
+    function removeShowFromMal(show, showToast) {
+        if (!_malSyncReady()) {
+            malSyncError = "Connect MyAnimeList before removing titles from your MAL list."
+            return
+        }
+        var malId = _showMalId(show)
+        if (malId.length === 0) {
+            malSyncError = "No MyAnimeList mapping is available for this title."
+            return
+        }
+        var title = String(show?.englishName || show?.name || "")
+        _queueMalCommand("delete-entry", false, [malId, title], showToast !== false)
     }
 
     function fetchGenres() {

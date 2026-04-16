@@ -4,7 +4,7 @@
     {
       "id": "anime-reloaded",
       "name": "AnimeReloaded",
-      "version": "2.2.0",
+      "version": "3.0.0",
       "official": false,
       "author": "demencia89",
       "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
@@ -16,7 +16,7 @@
         "Panel",
         "Entertainment"
       ],
-      "lastUpdated": "2026-04-15T22:01:56-03:00"
+      "lastUpdated": "2026-04-16T03:14:49.000Z"
     }
   ]
 }

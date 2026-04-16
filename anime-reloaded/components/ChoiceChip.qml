@@ -27,12 +27,15 @@ Item {
     signal clicked()
 
     readonly property bool hovered: enabled && hover.hovered
+    readonly property bool pressed: enabled && area.pressed
 
     implicitWidth: Math.max(minWidth, label.implicitWidth + horizontalPadding * 2)
     implicitHeight: controlHeight
     opacity: enabled ? 1 : 0.45
+    scale: pressed ? 0.985 : 1.0
 
     Behavior on opacity { NumberAnimation { duration: 160 } }
+    Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
 
     Rectangle {
         anchors.fill: parent
@@ -64,6 +67,7 @@ Item {
     HoverHandler { id: hover }
 
     MouseArea {
+        id: area
         anchors.fill: parent
         enabled: root.enabled
         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor

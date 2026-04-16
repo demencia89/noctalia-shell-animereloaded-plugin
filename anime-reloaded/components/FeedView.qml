@@ -349,97 +349,68 @@ Item {
                     width: feedScroll.width
                     spacing: 14
 
-                    Row {
+                    Flow {
                         width: parent.width
                         spacing: 10
 
-                        Rectangle {
-                            width: Math.floor((parent.width - 20) / 3)
-                            height: 68
-                            radius: 18
-                            color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.64)
-                            border.width: 1
-                            border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.14)
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 4
-
-                                Text {
-                                    text: "Unread"
-                                    font.pixelSize: 10
-                                    color: Color.mOnSurfaceVariant
-                                    opacity: 0.82
-                                }
-
-                                Text {
-                                    text: feedView._summaryValue(anime?.feedUnreadCount || 0)
-                                    font.pixelSize: 22
-                                    font.bold: true
-                                    color: Color.mPrimary
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: Math.floor((parent.width - 20) / 3)
-                            height: 68
-                            radius: 18
-                            color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.64)
-                            border.width: 1
-                            border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.14)
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 4
-
-                                Text {
-                                    text: "Following"
-                                    font.pixelSize: 10
-                                    color: Color.mOnSurfaceVariant
-                                    opacity: 0.82
-                                }
-
-                                Text {
-                                    text: feedView._summaryValue(feedSummary.following)
-                                    font.pixelSize: 22
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: parent.width - (Math.floor((parent.width - 20) / 3) * 2) - 20
-                            height: 68
-                            radius: 18
-                            color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.64)
-                            border.width: 1
-                            border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.14)
-
-                            Column {
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 4
-
-                                Text {
-                                    text: anime?.isFetchingFeed ? "Refreshing…" : feedView.updatedLabel()
-                                    font.pixelSize: 10
-                                    color: anime?.isFetchingFeed ? Color.mPrimary : Color.mOnSurfaceVariant
-                                    opacity: 0.86
-                                    elide: Text.ElideRight
-                                }
-
-                                Text {
-                                    text: feedSummary.alerts > 0
+                        Repeater {
+                            model: [
+                                {
+                                    title: "Unread",
+                                    value: feedView._summaryValue(anime?.feedUnreadCount || 0),
+                                    accent: "primary",
+                                    subtitle: ""
+                                },
+                                {
+                                    title: "Following",
+                                    value: feedView._summaryValue(feedSummary.following),
+                                    accent: "surface",
+                                    subtitle: ""
+                                },
+                                {
+                                    title: anime?.isFetchingFeed ? "Refreshing…" : feedView.updatedLabel(),
+                                    value: feedSummary.alerts > 0
                                         ? (feedSummary.alerts + " release alerts")
-                                        : (feedSummary.upcoming > 0 ? (feedSummary.upcoming + " upcoming releases") : "No pending alerts")
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                    elide: Text.ElideRight
+                                        : (feedSummary.upcoming > 0 ? (feedSummary.upcoming + " upcoming releases") : "No pending alerts"),
+                                    accent: anime?.isFetchingFeed ? "primary" : "surface",
+                                    subtitle: "wide"
+                                }
+                            ]
+
+                            delegate: Rectangle {
+                                readonly property real compactWidth:
+                                    Math.max(Math.floor((parent.width - parent.spacing * 2) / 3), 120)
+                                width: modelData.subtitle === "wide"
+                                    ? (parent.width >= 720
+                                        ? Math.max(parent.width - compactWidth * 2 - parent.spacing * 2, compactWidth)
+                                        : parent.width)
+                                    : compactWidth
+                                height: 68
+                                radius: 18
+                                color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.64)
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.14)
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 4
+
+                                    Text {
+                                        text: modelData.title
+                                        font.pixelSize: 10
+                                        color: modelData.accent === "primary" ? Color.mPrimary : Color.mOnSurfaceVariant
+                                        opacity: 0.84
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        text: modelData.value
+                                        font.pixelSize: modelData.subtitle === "wide" ? 14 : 22
+                                        font.bold: true
+                                        color: modelData.accent === "primary" ? Color.mPrimary : Color.mOnSurface
+                                        elide: Text.ElideRight
+                                    }
                                 }
                             }
                         }
@@ -492,6 +463,7 @@ Item {
                                 delegate: Rectangle {
                                     readonly property var itemData: modelData
                                     readonly property bool unread: anime?.isFeedItemUnread(itemData) ?? false
+                                    readonly property bool hovered: alertCardArea.containsMouse
 
                                     width: parent.width
                                     height: 108
@@ -508,6 +480,14 @@ Item {
                                         width: unread ? 5 : 3
                                         radius: width / 2
                                         color: unread ? Color.mPrimary : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
+                                    }
+
+                                    MouseArea {
+                                        id: alertCardArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: feedView.openEntry(itemData)
                                     }
 
                                     Row {
@@ -669,6 +649,14 @@ Item {
                                             }
                                         }
                                     }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 20
+                                        color: Color.mPrimary
+                                        opacity: alertCardArea.pressed ? 0.08 : (hovered ? 0.04 : 0.0)
+                                        Behavior on opacity { NumberAnimation { duration: 130 } }
+                                    }
                                 }
                             }
                         }
@@ -720,6 +708,7 @@ Item {
 
                                 delegate: Rectangle {
                                     readonly property var itemData: modelData
+                                    readonly property bool hovered: upcomingCardArea.containsMouse
 
                                     width: parent.width
                                     height: 92
@@ -728,6 +717,14 @@ Item {
                                     border.width: 1
                                     border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.1)
                                     clip: true
+
+                                    MouseArea {
+                                        id: upcomingCardArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: feedView.openEntry(itemData)
+                                    }
 
                                     Row {
                                         anchors.fill: parent
@@ -847,6 +844,14 @@ Item {
                                             activeTextColor: Color.mSecondary
                                             onClicked: feedView.openEntry(itemData)
                                         }
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 20
+                                        color: Color.mPrimary
+                                        opacity: upcomingCardArea.pressed ? 0.08 : (hovered ? 0.035 : 0.0)
+                                        Behavior on opacity { NumberAnimation { duration: 130 } }
                                     }
                                 }
                             }
