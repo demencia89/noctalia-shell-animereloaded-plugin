@@ -250,146 +250,6 @@ Item {
         return filtered
     }
 
-    function _emptyRuntimeDiagnostics() {
-        return {
-            version: 1,
-            overall: "unknown",
-            lastRunAt: 0,
-            python3: { status: "unknown", detail: "Not checked yet." },
-            mpv: { status: "unknown", detail: "Not checked yet." },
-            cryptography: { status: "unknown", detail: "Not checked yet." },
-            malBackend: { status: "unknown", detail: "Not checked yet." }
-        }
-    }
-
-    function _parseRuntimeDiagnosticsOutput(output) {
-        var diagnostics = _emptyRuntimeDiagnostics()
-        diagnostics.lastRunAt = Date.now()
-        var lines = String(output || "").split("\n")
-        for (var i = 0; i < lines.length; i++) {
-            var line = String(lines[i] || "").trim()
-            if (line.length === 0)
-                continue
-            var separator = line.indexOf("=")
-            if (separator <= 0)
-                continue
-            var key = line.substring(0, separator)
-            var value = line.substring(separator + 1)
-            if (key === "overall") {
-                diagnostics.overall = value || "unknown"
-                continue
-            }
-            var statusSeparator = value.indexOf("|")
-            var status = statusSeparator >= 0 ? value.substring(0, statusSeparator) : value
-            var detail = statusSeparator >= 0 ? value.substring(statusSeparator + 1) : ""
-            if (diagnostics[key] !== undefined)
-                diagnostics[key] = {
-                    status: status || "unknown",
-                    detail: detail || ""
-                }
-        }
-        return diagnostics
-    }
-
-    function _runtimeDiagnosticsScript() {
-        return [
-            "backend_url=$(printf '%s' \"$1\")",
-            "python_path=$(command -v python3 2>/dev/null || true)",
-            "mpv_path=$(command -v mpv 2>/dev/null || true)",
-            "python_status=missing",
-            "python_detail=python3 is not available in PATH.",
-            "mpv_status=missing",
-            "mpv_detail=mpv is not available in PATH.",
-            "crypto_status=skip",
-            "crypto_detail=Skipped because python3 is unavailable.",
-            "backend_status=skip",
-            "backend_detail=Skipped because python3 is unavailable.",
-            "if [ -n \"$python_path\" ]; then",
-            "  py_version=$(python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))' 2>/dev/null || true)",
-            "  if [ -n \"$py_version\" ]; then",
-            "    python_status=ok",
-            "    python_detail=Python\\ $py_version\\ available\\ at\\ $python_path.",
-            "  else",
-            "    python_status=error",
-            "    python_detail=python3 was found but could not report its version.",
-            "  fi",
-            "  if python3 -c 'import cryptography' >/dev/null 2>&1; then",
-            "    crypto_status=ok",
-            "    crypto_detail=Python\\ cryptography\\ package\\ import\\ succeeded.",
-            "  else",
-            "    crypto_status=error",
-            "    crypto_detail=Python\\ cryptography\\ package\\ is\\ missing\\ or\\ broken.",
-            "  fi",
-            "  if [ -n \"$backend_url\" ]; then",
-            "    backend_result=$(python3 - \"$backend_url\" <<'PY'",
-            "import sys",
-            "import urllib.error",
-            "import urllib.request",
-            "",
-            "base = (sys.argv[1] if len(sys.argv) > 1 else '').strip().rstrip('/')",
-            "if not base:",
-            "    print('skip|MAL backend URL is not configured.')",
-            "    raise SystemExit(0)",
-            "url = base + '/healthz'",
-            "try:",
-            "    with urllib.request.urlopen(url, timeout=6) as response:",
-            "        code = int(getattr(response, 'status', response.getcode()))",
-            "        body = response.read(160).decode('utf-8', errors='replace').strip()",
-            "    if 200 <= code < 300:",
-            "        detail = 'Healthy at ' + base",
-            "        if body:",
-            "            detail += ' (' + body.replace('\\n', ' ')[:80] + ')'",
-            "        print('ok|' + detail)",
-            "    else:",
-            "        print('warn|Backend responded with HTTP ' + str(code) + '.')",
-            "except Exception:",
-            "    print('warn|Could not reach MAL backend at ' + base + '.')",
-            "PY",
-            "    )",
-            "    backend_status=${backend_result%%|*}",
-            "    backend_detail=${backend_result#*|}",
-            "  else",
-            "    backend_status=skip",
-            "    backend_detail=MAL\\ backend\\ URL\\ is\\ not\\ configured.",
-            "  fi",
-            "fi",
-            "if [ -n \"$mpv_path\" ]; then",
-            "  mpv_status=ok",
-            "  mpv_detail=mpv\\ available\\ at\\ $mpv_path.",
-            "fi",
-            "overall=ok",
-            "if [ \"$python_status\" != \"ok\" ] || [ \"$mpv_status\" != \"ok\" ] || [ \"$crypto_status\" != \"ok\" ]; then",
-            "  overall=error",
-            "elif [ \"$backend_status\" = \"warn\" ]; then",
-            "  overall=warn",
-            "fi",
-            "printf 'overall=%s\\n' \"$overall\"",
-            "printf 'python3=%s|%s\\n' \"$python_status\" \"$python_detail\"",
-            "printf 'mpv=%s|%s\\n' \"$mpv_status\" \"$mpv_detail\"",
-            "printf 'cryptography=%s|%s\\n' \"$crypto_status\" \"$crypto_detail\"",
-            "printf 'malBackend=%s|%s\\n' \"$backend_status\" \"$backend_detail\""
-        ].join("\n")
-    }
-
-    function runRuntimeDiagnostics() {
-        runtimeDiagnosticsError = ""
-        runtimeDiagnosticsMessage = "Checking runtime dependencies..."
-        runtimeDiagnosticsProc._buf = ""
-        runtimeDiagnosticsProc.command = [
-            "sh", "-c",
-            _runtimeDiagnosticsScript(),
-            "sh",
-            String(malSync?.backendUrl || "")
-        ]
-        isRunningRuntimeDiagnostics = true
-        if (runtimeDiagnosticsProc.running) {
-            runtimeDiagnosticsProc.running = false
-            Qt.callLater(function() { runtimeDiagnosticsProc.running = true })
-        } else {
-            runtimeDiagnosticsProc.running = true
-        }
-    }
-
     function _entryRepairKey(entry) {
         return [
             _showMetadataProviderId(entry),
@@ -1182,12 +1042,6 @@ Item {
     property var    feedNotificationState: _emptyFeedNotificationState()
     property bool   _pendingStartupFeedToast: false
 
-    // ── Runtime diagnostics ──────────────────────────────────────────────────
-    property bool   isRunningRuntimeDiagnostics: false
-    property var    runtimeDiagnostics: _emptyRuntimeDiagnostics()
-    property string runtimeDiagnosticsMessage: ""
-    property string runtimeDiagnosticsError: ""
-
     // ── MyAnimeList sync state ───────────────────────────────────────────────
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
@@ -1267,7 +1121,6 @@ Item {
         _ensureProgressDir()
         fetchGenres()
         fetchPopular(true)
-        runRuntimeDiagnostics()
         if ((libraryList || []).length > 0) {
             _pendingStartupFeedToast = true
             startupFeedTimer.start()
@@ -2231,45 +2084,6 @@ Item {
         stderr: SplitParser {
             onRead: function(data) {
                 if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist browser auth:", data)
-            }
-        }
-    }
-
-    Process {
-        id: runtimeDiagnosticsProc
-        property string _buf: ""
-
-        onRunningChanged: {
-            if (running)
-                return
-            root.isRunningRuntimeDiagnostics = false
-            if (_buf.length === 0) {
-                root.runtimeDiagnostics = root._emptyRuntimeDiagnostics()
-                root.runtimeDiagnostics.lastRunAt = Date.now()
-                root.runtimeDiagnostics.overall = "error"
-                root.runtimeDiagnosticsError = "Runtime diagnostics did not return any data."
-                root.runtimeDiagnosticsMessage = ""
-                _buf = ""
-                return
-            }
-            root.runtimeDiagnostics = root._parseRuntimeDiagnosticsOutput(_buf)
-            root.runtimeDiagnosticsError = ""
-            if (root.runtimeDiagnostics.overall === "error")
-                root.runtimeDiagnosticsMessage = "Required runtime dependencies are missing or broken."
-            else if (root.runtimeDiagnostics.overall === "warn")
-                root.runtimeDiagnosticsMessage = "Core playback dependencies are ready, but optional services need attention."
-            else
-                root.runtimeDiagnosticsMessage = "Runtime dependencies look healthy."
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { runtimeDiagnosticsProc._buf += data + "\n" }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0)
-                    Logger.w("AnimeReloaded", "runtime diagnostics:", data)
             }
         }
     }
