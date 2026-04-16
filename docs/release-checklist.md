@@ -2,7 +2,7 @@
 
 ## Automated Checks
 
-- Run `python3 -m compileall anime-reloaded backend`
+- Run `python3 -m compileall anime-reloaded`
 - Run `node .github/workflows/update-registry.js` and confirm `registry.json` stays clean
 - Run `git diff --check`
 
@@ -19,8 +19,6 @@
 ## Settings Checks
 
 - Open Settings and confirm the layout reads as one coherent surface, including the Auto Push controls inside the same structured container
-- In `Runtime Health`, run `Refresh Checks` and confirm Python, mpv, cryptography, and MAL backend status populate
-- In `Playback Mapping Repair`, confirm unresolved mappings count appears and `Repair Mappings` updates library entries when mappings are recoverable
 - In `MyAnimeList`, confirm the top-row connect/reconnect/disconnect controls align cleanly with the account identity row
 
 ## MAL Sync Checks
