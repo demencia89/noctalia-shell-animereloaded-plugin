@@ -121,18 +121,6 @@ AnimeReloaded stores local runtime data in the plugin directory with `anime-relo
 
 `anime-reloaded-mal-config.json` contains local MAL backend session data and should remain untracked.
 
-## Current Limitations
-
-- Playback still depends on a resolvable AniList `->` AllAnime mapping. The built-in repair pass reduces manual cleanup, but it cannot invent mappings that neither provider exposes.
-- MAL pull only imports titles that map confidently back to AniList. Ambiguous or missing cross-service mappings are skipped instead of guessed.
-- Feed is intentionally a release-aware watchlist, not a full notification system with history, dismissal rules, or background delivery.
-- Runtime Health validates local prerequisites and MAL backend reachability, but it is still a lightweight startup self-test rather than an end-to-end provider integration test.
-
-## Release Checklist
-
-The manual release checklist lives in `docs/release-checklist.md`.
-
-
 ## Related Links
 
 - Legacy Anime plugin: [demencia89/noctalia-shell-anime-plugin](https://github.com/demencia89/noctalia-shell-anime-plugin)
