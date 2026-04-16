@@ -1,6 +1,8 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.UI
 
 Item {
     id: root
@@ -24,15 +26,19 @@ Item {
     }
 
     readonly property string scriptPath:
-        _runtimePath("allanime.py")
+        _runtimePath("provider_cli.py")
     readonly property string luaPath:
         _runtimePath("progress.lua")
     readonly property string progressDir:
         _pathJoin(pluginApi?.pluginDir ?? "", "progress")
     readonly property string feedLibraryPath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-library.json")
+        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-library.json")
     readonly property string feedCachePath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-feed-cache.json")
+        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-feed-cache.json")
+    readonly property string providerMappingPath:
+        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-provider-map.json")
+    readonly property string malConfigPath:
+        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-mal-config.json")
 
     // ── Settings ──────────────────────────────────────────────────────────────
     property string currentMode:
@@ -43,6 +49,19 @@ Item {
     property string panelSize:  pluginApi?.pluginSettings?.panelSize  || "medium"
     property string posterSize: pluginApi?.pluginSettings?.posterSize || "medium"
     property string preferredProvider: pluginApi?.pluginSettings?.preferredProvider || "auto"
+    property bool   enableStartupFeedToast:
+        pluginApi?.pluginSettings?.enableStartupFeedToast !== false
+    property string metadataProviderId:
+        pluginApi?.pluginSettings?.metadataProvider ||
+        pluginApi?.manifest?.metadata?.defaultSettings?.metadataProvider ||
+        pluginApi?.manifest?.metadata?.providers?.metadata?.default ||
+        "allanime"
+    property string streamProviderId:
+        pluginApi?.pluginSettings?.streamProvider ||
+        pluginApi?.manifest?.metadata?.defaultSettings?.streamProvider ||
+        pluginApi?.manifest?.metadata?.providers?.stream?.default ||
+        "allanime"
+    property var    malSync: _normaliseMalSync(pluginApi?.pluginSettings?.malSync)
     property var    browseCache: ({})
     property var    detailCache: ({})
 
@@ -62,12 +81,275 @@ Item {
         }
     }
 
+    function _emptyFeedNotificationState() {
+        return {
+            version: 1,
+            media: ({})
+        }
+    }
+
+    function _emptyMalSync() {
+        return {
+            version: 1,
+            enabled: false,
+            autoPush: false,
+            clientId: "",
+            clientSecret: "",
+            redirectUri: "",
+            codeVerifier: "",
+            authUrl: "",
+            accessToken: "",
+            refreshToken: "",
+            tokenType: "Bearer",
+            expiresAt: 0,
+            userName: "",
+            userPicture: "",
+            lastSyncAt: 0,
+            lastSyncDirection: ""
+        }
+    }
+
+    function _normaliseMalSync(raw) {
+        var config = _deepClone(raw)
+        if (!config || typeof config !== "object" || Array.isArray(config))
+            config = _emptyMalSync()
+        config.version = 1
+        config.enabled = config.enabled === true
+        config.autoPush = config.autoPush === true
+        config.clientId = String(config.clientId || "")
+        config.clientSecret = String(config.clientSecret || "")
+        config.redirectUri = String(config.redirectUri || "")
+        config.codeVerifier = String(config.codeVerifier || "")
+        config.authUrl = String(config.authUrl || "")
+        config.accessToken = String(config.accessToken || "")
+        config.refreshToken = String(config.refreshToken || "")
+        config.tokenType = String(config.tokenType || "Bearer")
+        config.expiresAt = Number(config.expiresAt || 0)
+        config.userName = String(config.userName || "")
+        config.userPicture = String(config.userPicture || "")
+        config.lastSyncAt = Number(config.lastSyncAt || 0)
+        config.lastSyncDirection = String(config.lastSyncDirection || "")
+        return config
+    }
+
+    function _normaliseFeedNotificationState(raw) {
+        var state = _deepClone(raw)
+        if (!state || typeof state !== "object" || Array.isArray(state))
+            state = _emptyFeedNotificationState()
+        if (!state.media || typeof state.media !== "object" || Array.isArray(state.media))
+            state.media = ({})
+        state.version = 1
+        return state
+    }
+
+    function _loadFeedNotificationState() {
+        feedNotificationState = _normaliseFeedNotificationState(pluginApi?.pluginSettings?.feedNotificationState)
+    }
+
+    function _saveFeedNotificationState() {
+        if (!pluginApi) return
+        pluginApi.pluginSettings.feedNotificationState = _deepClone(feedNotificationState)
+        pluginApi.saveSettings()
+    }
+
+    function _saveMalSyncSettings() {
+        if (!pluginApi) return
+        pluginApi.pluginSettings.malSync = _deepClone(malSync)
+        pluginApi.saveSettings()
+    }
+
+    function setMalSyncField(key, value) {
+        var next = _normaliseMalSync(malSync)
+        next[key] = value
+        malSync = _normaliseMalSync(next)
+        _saveMalSyncSettings()
+    }
+
+    function updateMalSyncConfig(config) {
+        malSync = _normaliseMalSync(config)
+        _saveMalSyncSettings()
+    }
+
+    function clearMalSyncSession() {
+        malAutoPushTimer.stop()
+        var next = _normaliseMalSync(malSync)
+        next.enabled = false
+        next.codeVerifier = ""
+        next.authUrl = ""
+        next.accessToken = ""
+        next.refreshToken = ""
+        next.tokenType = "Bearer"
+        next.expiresAt = 0
+        next.userName = ""
+        next.userPicture = ""
+        next.lastSyncAt = 0
+        next.lastSyncDirection = ""
+        updateMalSyncConfig(next)
+        malSyncError = ""
+        malSyncMessage = "Disconnected from MyAnimeList."
+    }
+
+    function _feedMediaId(item) {
+        return String(item?.providerRefs?.metadata?.id || item?.mediaId || "")
+    }
+
+    function _feedReleasedEpisode(item) {
+        return Number(item?.latestReleasedEpisode || item?.eventEpisode || 0)
+    }
+
+    function _feedStateEntry(state, mediaId, createIfMissing) {
+        if (!mediaId) return null
+        var mediaState = state?.media || ({})
+        var entry = mediaState[mediaId]
+        if (!entry && createIfMissing) {
+            entry = {
+                lastSeenEpisode: 0,
+                lastToastEpisode: 0,
+                lastKnownReleasedEpisode: 0
+            }
+            mediaState[mediaId] = entry
+            state.media = mediaState
+        }
+        return entry || null
+    }
+
+    function _recomputeFeedUnreadCount(items, state) {
+        var alerts = items || []
+        var currentState = state || feedNotificationState || _emptyFeedNotificationState()
+        var unread = 0
+        for (var i = 0; i < alerts.length; i++) {
+            var item = alerts[i]
+            var mediaId = _feedMediaId(item)
+            var latestEpisode = _feedReleasedEpisode(item)
+            if (!mediaId || latestEpisode <= 0)
+                continue
+            var entry = _feedStateEntry(currentState, mediaId, false)
+            var lastSeen = Number(entry?.lastSeenEpisode || 0)
+            if (latestEpisode > lastSeen)
+                unread++
+        }
+        feedUnreadCount = unread
+    }
+
+    function isFeedItemUnread(item) {
+        var mediaId = _feedMediaId(item)
+        var latestEpisode = _feedReleasedEpisode(item)
+        if (!mediaId || latestEpisode <= 0)
+            return false
+        var entry = _feedStateEntry(feedNotificationState, mediaId, false)
+        return latestEpisode > Number(entry?.lastSeenEpisode || 0)
+    }
+
+    function _applyFeedPayload(payload) {
+        var alerts = payload?.results || []
+        var upcoming = payload?.upcoming || []
+        var summary = payload?.summary || ({
+            alerts: alerts.length,
+            upcoming: upcoming.length,
+            following: alerts.length + upcoming.length
+        })
+
+        var state = _normaliseFeedNotificationState(feedNotificationState)
+        var changed = false
+        var toastCount = 0
+
+        for (var i = 0; i < alerts.length; i++) {
+            var item = alerts[i]
+            var mediaId = _feedMediaId(item)
+            var latestEpisode = _feedReleasedEpisode(item)
+            if (!mediaId || latestEpisode <= 0)
+                continue
+            var entry = _feedStateEntry(state, mediaId, true)
+            if (latestEpisode > Number(entry.lastKnownReleasedEpisode || 0)) {
+                entry.lastKnownReleasedEpisode = latestEpisode
+                changed = true
+            }
+            if (_pendingStartupFeedToast && latestEpisode > Number(entry.lastToastEpisode || 0))
+                toastCount++
+        }
+
+        feedNotificationState = state
+        feedList = alerts
+        feedUpcomingList = upcoming
+        feedSummary = summary
+        feedError = ""
+        feedLastFetchedAt = Date.now()
+
+        if (_pendingStartupFeedToast) {
+            if (toastCount > 0) {
+                for (var j = 0; j < alerts.length; j++) {
+                    var toastItem = alerts[j]
+                    var toastMediaId = _feedMediaId(toastItem)
+                    var toastEpisode = _feedReleasedEpisode(toastItem)
+                    if (!toastMediaId || toastEpisode <= 0)
+                        continue
+                    var toastEntry = _feedStateEntry(feedNotificationState, toastMediaId, true)
+                    if (toastEpisode > Number(toastEntry.lastToastEpisode || 0)) {
+                        toastEntry.lastToastEpisode = toastEpisode
+                        changed = true
+                    }
+                }
+                if (enableStartupFeedToast) {
+                    ToastService.showNotice(
+                        "AnimeReloaded",
+                        toastCount === 1 ? "1 new episode release in Feed" : (toastCount + " new episode releases in Feed"),
+                        "device-tv",
+                        4200
+                    )
+                }
+            }
+            _pendingStartupFeedToast = false
+        }
+
+        _recomputeFeedUnreadCount(alerts, feedNotificationState)
+        if (changed)
+            _saveFeedNotificationState()
+    }
+
     function _browseCacheKey(args) {
         return args.join("\u241f")
     }
 
-    function _detailCacheKey(showId, mode) {
-        return String(showId || "") + "\u241f" + String(mode || "")
+    function _detailCacheKey(show, mode) {
+        return [
+            _showMetadataProviderId(show),
+            _showMetadataId(show),
+            String(mode || "")
+        ].join("\u241f")
+    }
+
+    function _showMetadataProviderId(show) {
+        var explicitProvider = String(show?.providerRefs?.metadata?.provider || "")
+        if (explicitProvider.length > 0)
+            return explicitProvider
+        var showId = String(show?.id || "")
+        if ((metadataProviderId || "anilist") === "anilist" && !/^\d+$/.test(showId))
+            return "allanime"
+        return String(metadataProviderId || "anilist")
+    }
+
+    function _showMetadataId(show) {
+        return String(show?.providerRefs?.metadata?.id || show?.id || "")
+    }
+
+    function _showStreamProviderId(show) {
+        return String(show?.providerRefs?.stream?.provider || streamProviderId || "allanime")
+    }
+
+    function _metadataCommand(command, args, providerId) {
+        return ["python3", scriptPath, "metadata", providerId || metadataProviderId, command].concat(args || [])
+    }
+
+    function _showMetadataCommand(show, command, args) {
+        return _metadataCommand(command, args, _showMetadataProviderId(show))
+    }
+
+    function _streamCommand(show, epNum) {
+        return [
+            "python3", scriptPath, "stream", _showStreamProviderId(show), "resolve",
+            _showMetadataId(show), String(epNum || ""), currentMode,
+            preferredProvider, "best", providerMappingPath, _showMetadataProviderId(show)
+        ]
     }
 
     function _formatPlaybackError(stderrTail) {
@@ -103,6 +385,8 @@ Item {
     function setSetting(key, val) {
         if (key === "mode") currentMode = val
         if (key === "preferredProvider") preferredProvider = val
+        if (key === "metadataProvider") metadataProviderId = val
+        if (key === "streamProvider") streamProviderId = val
 
         if (key === "panelSize") {
             panelSize = val
@@ -145,16 +429,31 @@ Item {
     property string currentSearchQuery: ""
     property string currentGenre:    ""
     property var    genresList:      []
+    property int    browseResetToken: 0
     property int    _page:           1
     property bool   _hasMore:        true
     property real   browseScrollY:   0
 
     // ── Feed state ────────────────────────────────────────────────────────────
     property var    feedList:        []
+    property var    feedUpcomingList: []
+    property var    feedSummary:     ({ alerts: 0, upcoming: 0, following: 0 })
     property bool   isFetchingFeed:  false
     property string feedError:       ""
     property double feedLastFetchedAt: 0
     property int    feedCooldownMs:  300000
+    property int    feedUnreadCount: 0
+    property var    feedNotificationState: _emptyFeedNotificationState()
+    property bool   _pendingStartupFeedToast: false
+
+    // ── MyAnimeList sync state ───────────────────────────────────────────────
+    property bool   isMalSyncBusy: false
+    property string malSyncError: ""
+    property string malSyncMessage: ""
+    property string malSyncAuthCode: ""
+    property string _pendingMalCommand: ""
+    property bool   _pendingMalShowsToast: true
+    property bool   _suppressMalAutoPush: false
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -209,9 +508,28 @@ Item {
         if (pluginApi && pluginApi.pluginSettings)
             pluginApi.pluginSettings.posterSize = posterSize
         _loadLibrary()
+        _loadFeedNotificationState()
         _ensureProgressDir()
         fetchGenres()
         fetchPopular(true)
+        if ((libraryList || []).length > 0) {
+            _pendingStartupFeedToast = true
+            startupFeedTimer.start()
+        }
+    }
+
+    Timer {
+        id: startupFeedTimer
+        interval: 1500
+        repeat: false
+        onTriggered: root.fetchFollowingFeed(false)
+    }
+
+    Timer {
+        id: malAutoPushTimer
+        interval: 1800
+        repeat: false
+        onTriggered: root.pushMalSync(false)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -220,18 +538,82 @@ Item {
         mkdirProc.running = true
     }
 
-    function _saveLibrary() {
+    function _malSyncReady() {
+        return String(malSync?.clientId || "").length > 0
+            && String(malSync?.accessToken || "").length > 0
+            && String(malSync?.userName || "").length > 0
+    }
+
+    function _queueMalAutoPush() {
+        if (_suppressMalAutoPush) return
+        if (!(malSync?.autoPush === true) || !_malSyncReady())
+            return
+        malAutoPushTimer.restart()
+    }
+
+    function _normaliseLibraryEntry(entry) {
+        var item = _deepClone(entry || {})
+        if (!item || typeof item !== "object" || Array.isArray(item))
+            item = ({})
+        item.id = String(item.id || "")
+        item.name = String(item.name || "")
+        item.englishName = String(item.englishName || "")
+        item.nativeName = String(item.nativeName || "")
+        item.thumbnail = String(item.thumbnail || "")
+        item.type = String(item.type || "")
+        item.episodeCount = item.episodeCount || ""
+        item.availableEpisodes = item.availableEpisodes || {sub: 0, dub: 0, raw: 0}
+        item.season = item.season || null
+        item.providerRefs = _deepClone(item.providerRefs || {})
+        item.lastWatchedEpId = String(item.lastWatchedEpId || "")
+        item.lastWatchedEpNum = String(item.lastWatchedEpNum || "")
+        item.watchedEpisodes = Array.isArray(item.watchedEpisodes) ? item.watchedEpisodes.slice() : []
+        item.episodeProgress = (item.episodeProgress && typeof item.episodeProgress === "object" && !Array.isArray(item.episodeProgress))
+            ? _deepClone(item.episodeProgress)
+            : ({})
+        item.updatedAt = Number(item.updatedAt || Date.now())
+        return item
+    }
+
+    function _mergeLibraryEntry(entry, overrides) {
+        var merged = _normaliseLibraryEntry(entry)
+        var next = overrides || ({})
+        Object.keys(next).forEach(function(key) {
+            if (key === "providerRefs")
+                merged.providerRefs = root._deepClone(next.providerRefs || {})
+            else if (key === "watchedEpisodes")
+                merged.watchedEpisodes = Array.isArray(next.watchedEpisodes) ? next.watchedEpisodes.slice() : []
+            else if (key === "episodeProgress")
+                merged.episodeProgress = root._deepClone(next.episodeProgress || {})
+            else
+                merged[key] = next[key]
+        })
+        if (!merged.providerRefs || typeof merged.providerRefs !== "object" || Array.isArray(merged.providerRefs))
+            merged.providerRefs = ({})
+        if (!Array.isArray(merged.watchedEpisodes))
+            merged.watchedEpisodes = []
+        if (!merged.episodeProgress || typeof merged.episodeProgress !== "object" || Array.isArray(merged.episodeProgress))
+            merged.episodeProgress = ({})
+        merged.updatedAt = Number(merged.updatedAt || Date.now())
+        return merged
+    }
+
+    function _saveLibrary(skipAutoSync) {
         if (!pluginApi) return
         pluginApi.pluginSettings.library = libraryList
         pluginApi.saveSettings()
         feedLastFetchedAt = 0
         libraryVersion++  // trigger reactive re-evaluation in views
+        if (skipAutoSync !== true)
+            _queueMalAutoPush()
     }
 
     function _loadLibrary() {
         if (!pluginApi) return
         var raw = pluginApi.pluginSettings?.library
-        libraryList = (raw && Array.isArray(raw)) ? raw : []
+        libraryList = (raw && Array.isArray(raw))
+            ? raw.map(function(entry) { return _normaliseLibraryEntry(entry) })
+            : []
         libraryLoaded = true
         feedLastFetchedAt = 0
         libraryVersion++
@@ -277,7 +659,12 @@ Item {
     }
 
     function _makeEntry(show, lastEpId, lastEpNum) {
-        return {
+        var providerRefs = _deepClone(show?.providerRefs || {})
+        if (!providerRefs.metadata)
+            providerRefs.metadata = { provider: _showMetadataProviderId(show), id: _showMetadataId(show) }
+        if (!providerRefs.stream && providerRefs.metadata.provider === _showStreamProviderId(show))
+            providerRefs.stream = { provider: _showStreamProviderId(show), id: String(show?.id || "") }
+        return _normaliseLibraryEntry({
             id: show.id, name: show.name || "",
             englishName: show.englishName || "",
             nativeName: show.nativeName || "",
@@ -287,12 +674,13 @@ Item {
             episodeCount: show.episodeCount || "",
             availableEpisodes: show.availableEpisodes || {sub:0,dub:0,raw:0},
             season: show.season || null,
+            providerRefs: providerRefs,
             lastWatchedEpId:  lastEpId  ? String(lastEpId)  : "",
             lastWatchedEpNum: lastEpNum ? String(lastEpNum) : "",
             watchedEpisodes:  [],
             episodeProgress:  {},
             updatedAt: Date.now()
-        }
+        })
     }
 
     function addToLibrary(show) {
@@ -322,17 +710,11 @@ Item {
     function updateLastWatched(showId, epId, epNum) {
         var updated = libraryList.map(function(e) {
             if (e.id !== showId) return e
-            return {
-                id: e.id, name: e.name, englishName: e.englishName,
-                nativeName: e.nativeName, thumbnail: e.thumbnail,
-                score: e.score, type: e.type, episodeCount: e.episodeCount,
-                availableEpisodes: e.availableEpisodes, season: e.season,
+            return _mergeLibraryEntry(e, {
                 lastWatchedEpId:  String(epId),
                 lastWatchedEpNum: String(epNum),
-                watchedEpisodes:  e.watchedEpisodes  || [],
-                episodeProgress:  e.episodeProgress  || {},
                 updatedAt: Date.now()
-            }
+            })
         })
         libraryList = updated
         _saveLibrary()
@@ -346,17 +728,11 @@ Item {
             // Clear progress since it's fully watched
             var prog = Object.assign({}, e.episodeProgress || {})
             delete prog[String(epNum)]
-            return {
-                id: e.id, name: e.name, englishName: e.englishName,
-                nativeName: e.nativeName, thumbnail: e.thumbnail,
-                score: e.score, type: e.type, episodeCount: e.episodeCount,
-                availableEpisodes: e.availableEpisodes, season: e.season,
-                lastWatchedEpId:  e.lastWatchedEpId,
-                lastWatchedEpNum: e.lastWatchedEpNum,
+            return _mergeLibraryEntry(e, {
                 watchedEpisodes:  watched,
                 episodeProgress:  prog,
                 updatedAt: Date.now()
-            }
+            })
         })
         libraryList = updated
         _saveLibrary()
@@ -368,17 +744,13 @@ Item {
             var watched = (e.watchedEpisodes || []).filter(function(item) {
                 return item !== String(epNum)
             })
-            return {
-                id: e.id, name: e.name, englishName: e.englishName,
-                nativeName: e.nativeName, thumbnail: e.thumbnail,
-                score: e.score, type: e.type, episodeCount: e.episodeCount,
-                availableEpisodes: e.availableEpisodes, season: e.season,
+            return _mergeLibraryEntry(e, {
                 lastWatchedEpId: e.lastWatchedEpNum === String(epNum) ? "" : e.lastWatchedEpId,
                 lastWatchedEpNum: e.lastWatchedEpNum === String(epNum) ? "" : e.lastWatchedEpNum,
                 watchedEpisodes: watched,
                 episodeProgress: e.episodeProgress || {},
                 updatedAt: Date.now()
-            }
+            })
         })
         libraryList = updated
         _saveLibrary()
@@ -446,26 +818,104 @@ Item {
             delete prog[number]
         })
 
-        updated[existingIndex] = {
-            id: current.id,
-            name: current.name,
-            englishName: current.englishName,
-            nativeName: current.nativeName,
-            thumbnail: current.thumbnail,
-            score: current.score,
-            type: current.type,
-            episodeCount: current.episodeCount,
-            availableEpisodes: current.availableEpisodes,
-            season: current.season,
+        updated[existingIndex] = _mergeLibraryEntry(current, {
             lastWatchedEpId: String(epId || ""),
             lastWatchedEpNum: String(epNum || ""),
             watchedEpisodes: mergedWatched,
             episodeProgress: prog,
             updatedAt: Date.now()
-        }
+        })
 
         libraryList = updated
         _saveLibrary()
+    }
+
+    function _parseEpisodeNumber(value) {
+        var parsed = Number(value)
+        return isFinite(parsed) ? parsed : 0
+    }
+
+    function _showWatchTarget(show) {
+        var episodes = _normaliseEpisodeList(show?.episodes || [])
+        if (episodes.length === 0)
+            return null
+
+        var targetIndex = episodes.length - 1
+        var targetEpisode = episodes[targetIndex]
+        if (!targetEpisode || String(targetEpisode.number || "").length === 0)
+            return null
+
+        return {
+            index: targetIndex,
+            episodeId: String(targetEpisode.id || ""),
+            episodeNumber: String(targetEpisode.number || ""),
+            loadedEpisodes: episodes.length
+        }
+    }
+
+    function _isCompletedShowStatus(show) {
+        var status = String(show?.status || "").toUpperCase()
+        return status === "FINISHED" || status === "CANCELLED"
+    }
+
+    function getShowWatchAction(show) {
+        var _ = libraryVersion  // reactive dependency
+        if (!show || !show.id)
+            return null
+
+        var target = _showWatchTarget(show)
+        if (!target)
+            return null
+
+        var totalEpisodes = _parseEpisodeNumber(show?.episodeCount)
+        var availableMap = show?.availableEpisodes || {}
+        var availableEpisodes = _parseEpisodeNumber(availableMap[currentMode] || 0)
+        if (availableEpisodes <= 0)
+            availableEpisodes = _parseEpisodeNumber(show?.availableEpisodes?.sub || show?.availableEpisodes?.raw || 0)
+        availableEpisodes = Math.max(availableEpisodes, target.loadedEpisodes)
+
+        var canMarkFullyWatched = _isCompletedShowStatus(show) &&
+            (totalEpisodes <= 0 || availableEpisodes >= totalEpisodes)
+
+        var label = canMarkFullyWatched ? "Mark Watched" : "Mark Up to Date"
+        var doneLabel = canMarkFullyWatched ? "Fully Watched" : "Up to Date"
+
+        var entry = getLibraryEntry(show.id)
+        var alreadyApplied = false
+        if (entry && String(entry.lastWatchedEpNum || "") === target.episodeNumber) {
+            alreadyApplied = true
+            var episodes = _normaliseEpisodeList(show?.episodes || [])
+            for (var i = 0; i <= target.index && i < episodes.length; i++) {
+                if (!isEpisodeWatched(show.id, episodes[i].number)) {
+                    alreadyApplied = false
+                    break
+                }
+            }
+        }
+
+        return {
+            label: alreadyApplied ? doneLabel : label,
+            targetEpisodeId: target.episodeId,
+            targetEpisodeNumber: target.episodeNumber,
+            targetEpisodeIndex: target.index,
+            isComplete: alreadyApplied,
+            marksFullyWatched: canMarkFullyWatched
+        }
+    }
+
+    function applyShowWatchAction(show) {
+        var action = getShowWatchAction(show)
+        if (!action || action.isComplete)
+            return false
+
+        markEpisodesThrough(
+            show,
+            action.targetEpisodeId,
+            action.targetEpisodeNumber,
+            action.targetEpisodeIndex
+        )
+        fetchFollowingFeed(true)
+        return true
     }
 
     function saveEpisodeProgress(showId, epNum, position, duration) {
@@ -476,17 +926,10 @@ Item {
                 position: position,
                 duration: duration || 0
             }
-            return {
-                id: e.id, name: e.name, englishName: e.englishName,
-                nativeName: e.nativeName, thumbnail: e.thumbnail,
-                score: e.score, type: e.type, episodeCount: e.episodeCount,
-                availableEpisodes: e.availableEpisodes, season: e.season,
-                lastWatchedEpId:  e.lastWatchedEpId,
-                lastWatchedEpNum: e.lastWatchedEpNum,
-                watchedEpisodes:  e.watchedEpisodes || [],
+            return _mergeLibraryEntry(e, {
                 episodeProgress:  prog,
                 updatedAt: Date.now()
-            }
+            })
         })
         libraryList = updated
         _saveLibrary()
@@ -642,7 +1085,7 @@ Item {
         _mpvLastMeaningfulError = ""
         var args = [
             "mpv", "--fs", "--force-window=yes",
-            "--title=" + (title || "Anime"),
+            "--title=" + (title || "AnimeReloaded"),
             "--script=" + luaPath,
             "--script-opts=progress_file=" + progressFile,
         ]
@@ -738,7 +1181,7 @@ Item {
                 root._mpvStderrTail = line
                 if (line.indexOf("Exiting...") === -1 && line.indexOf("errors while loading file") === -1)
                     root._mpvLastMeaningfulError = line
-                Logger.w("Anime", "mpv:", line)
+                Logger.w("AnimeReloaded", "mpv:", line)
             }
         }
         stdout: SplitParser {
@@ -748,7 +1191,7 @@ Item {
                 root._mpvStderrTail = line
                 if (line.indexOf("Exiting...") === -1 && line.indexOf("errors while loading file") === -1)
                     root._mpvLastMeaningfulError = line
-                Logger.w("Anime", "mpv:", line)
+                Logger.w("AnimeReloaded", "mpv:", line)
             }
         }
     }
@@ -854,6 +1297,90 @@ Item {
         }
     }
 
+    Process {
+        id: malWriteProc
+        property string _configPayload: ""
+        property string _libraryPayload: ""
+        property bool _includeLibrary: false
+        property var _nextCommand: []
+
+        onRunningChanged: {
+            if (running) return
+            root._runPreparedMalCommand(_nextCommand)
+        }
+    }
+
+    Process {
+        id: malProc
+        property string _buf: ""
+
+        onRunningChanged: {
+            if (running) return
+            root.isMalSyncBusy = false
+            if (_buf.length === 0) return
+            try {
+                var d = JSON.parse(_buf)
+                if (d.error) {
+                    root.malSyncError = d.error
+                    root.malSyncMessage = ""
+                    _buf = ""
+                    return
+                }
+                if (d.config)
+                    root.updateMalSyncConfig(d.config)
+                if (root._pendingMalCommand === "pull" && Array.isArray(d.library)) {
+                    root._suppressMalAutoPush = true
+                    root.libraryList = d.library.map(function(entry) {
+                        return root._normaliseLibraryEntry(entry)
+                    })
+                    root._saveLibrary(true)
+                    root._suppressMalAutoPush = false
+                    root.fetchFollowingFeed(true)
+                }
+
+                var summary = d.summary || ({})
+                if (root._pendingMalCommand === "auth-url" && d.authUrl) {
+                    root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
+                    Qt.openUrlExternally(d.authUrl)
+                } else if (root._pendingMalCommand === "exchange") {
+                    root.malSyncAuthCode = ""
+                    root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
+                } else if (root._pendingMalCommand === "refresh") {
+                    root.malSyncMessage = "Refreshed MyAnimeList session."
+                } else if (root._pendingMalCommand === "push") {
+                    root.malSyncMessage = "Pushed " + Number(summary.updated || 0) + " library entr" + (Number(summary.updated || 0) === 1 ? "y" : "ies") + " to MyAnimeList."
+                } else if (root._pendingMalCommand === "pull") {
+                    root.malSyncMessage = "Pulled " + Number(summary.updated || 0) + " updated entr" + (Number(summary.updated || 0) === 1 ? "y" : "ies") + " from MyAnimeList."
+                } else {
+                    root.malSyncMessage = "MyAnimeList sync completed."
+                }
+                root.malSyncError = ""
+
+                if (root._pendingMalShowsToast) {
+                    ToastService.showNotice(
+                        "AnimeReloaded",
+                        root.malSyncMessage,
+                        "device-tv",
+                        3200
+                    )
+                }
+            } catch(e) {
+                root.malSyncError = "Parse error: " + e
+                Logger.w("AnimeReloaded", "myanimelist sync parse error:", e)
+            }
+            _buf = ""
+        }
+
+        stdout: SplitParser {
+            onRead: function(data) { malProc._buf += data }
+        }
+        stderr: SplitParser {
+            onRead: function(data) {
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist:", data)
+            }
+        }
+    }
+
     // ── Browse processes ──────────────────────────────────────────────────────
     Process {
         id: genreProc
@@ -863,7 +1390,7 @@ Item {
             if (_buf.length === 0) return
             try {
                 root.genresList = JSON.parse(_buf)
-            } catch(e) { Logger.w("Anime", "genres parse error:", e) }
+            } catch(e) { Logger.w("AnimeReloaded", "genres parse error:", e) }
             _buf = ""
         }
         stdout: SplitParser {
@@ -889,6 +1416,8 @@ Item {
                     hasNextPage: d.hasNextPage || false
                 })
                 var results = d.results || []
+                if (_reset)
+                    root.browseResetToken++
                 root.animeList = _reset ? results : root.animeList.concat(results)
                 root._hasMore = d.hasNextPage || false
                 root._page++
@@ -901,7 +1430,7 @@ Item {
         }
         stderr: SplitParser {
             onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("Anime", "browse:", data)
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "browse:", data)
             }
         }
     }
@@ -920,17 +1449,21 @@ Item {
                 var d = JSON.parse(_buf)
                 if (d.error) { root.detailError = d.error; _buf = ""; return }
                 if (_show) {
-                    var enriched = Object.assign({}, _show)
+                    var preserveLocalId = String(_show?.providerRefs?.metadata?.id || "") !== String(_show?.id || "")
+                    var enriched = Object.assign({}, _show, d)
+                    if (preserveLocalId)
+                        enriched.id = _show.id
                     enriched.episodes = root._normaliseEpisodeList(d.episodes || [])
-                    if (d.description) enriched.description = d.description
-                    if (d.thumbnail)   enriched.thumbnail   = d.thumbnail
+                    if (d.providerRefs)
+                        enriched.providerRefs = root._deepClone(d.providerRefs)
+                    root.detailError = d.mappingError || ""
                     root.detailCache[_cacheKey] = root._deepClone(enriched)
                     root.currentAnime = enriched
                     root._maybeAutoPlayPendingShow(enriched)
                 }
             } catch(e) {
                 root.detailError = "Parse error: " + e
-                Logger.w("Anime", "detail error:", e)
+                Logger.w("AnimeReloaded", "detail error:", e)
             }
             _buf = ""
         }
@@ -940,7 +1473,7 @@ Item {
         }
         stderr: SplitParser {
             onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("Anime", "detail:", data)
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "detail:", data)
             }
         }
     }
@@ -960,12 +1493,10 @@ Item {
                     _buf = ""
                     return
                 }
-                root.feedList = d.results || []
-                root.feedError = ""
-                root.feedLastFetchedAt = Date.now()
+                root._applyFeedPayload(d)
             } catch(e) {
                 root.feedError = "Parse error: " + e
-                Logger.w("Anime", "feed error:", e)
+                Logger.w("AnimeReloaded", "feed error:", e)
             }
             _buf = ""
         }
@@ -975,7 +1506,7 @@ Item {
         }
         stderr: SplitParser {
             onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("Anime", "feed:", data)
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "feed:", data)
             }
         }
     }
@@ -1001,18 +1532,20 @@ Item {
         }
         stderr: SplitParser {
             onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("Anime", "stream:", data)
+                if (data.trim().length > 0) Logger.w("AnimeReloaded", "stream:", data)
             }
         }
     }
 
     // ── Internal browse helper ────────────────────────────────────────────────
-    function _runBrowse(args, reset) {
-        var cacheKey = _browseCacheKey(args)
+    function _runBrowse(commandArgs, reset) {
+        var cacheKey = _browseCacheKey(commandArgs)
         if (browseCache[cacheKey]) {
             var cached = _deepClone(browseCache[cacheKey])
             animeError = ""
             isFetchingAnime = false
+            if (reset)
+                browseResetToken++
             animeList = reset ? (cached.results || []) : animeList.concat(cached.results || [])
             _hasMore = cached.hasNextPage || false
             _page++
@@ -1021,7 +1554,7 @@ Item {
         browseProc._buf   = ""
         browseProc._reset = reset
         browseProc._cacheKey = cacheKey
-        browseProc.command = ["python3", scriptPath].concat(args)
+        browseProc.command = commandArgs
         isFetchingAnime = true
         animeError = ""
         if (browseProc.running) {
@@ -1032,20 +1565,128 @@ Item {
         }
     }
 
+    function _syncCommand(command, args) {
+        return ["python3", scriptPath, "sync", "myanimelist", command, malConfigPath].concat(args || [])
+    }
+
+    function _runPreparedMalCommand(commandArgs) {
+        malProc._buf = ""
+        malProc.command = commandArgs
+        isMalSyncBusy = true
+        malSyncError = ""
+        if (malProc.running) {
+            malProc.running = false
+            Qt.callLater(function() { malProc.running = true })
+        } else {
+            malProc.running = true
+        }
+    }
+
+    function _queueMalCommand(command, includeLibrary, extraArgs, showToast) {
+        _pendingMalCommand = String(command || "")
+        _pendingMalShowsToast = showToast !== false
+        malSyncError = ""
+        malSyncMessage = ""
+
+        var configPayload = JSON.stringify(_normaliseMalSync(malSync))
+        var libraryPayload = JSON.stringify(libraryList || [])
+        malWriteProc._configPayload = configPayload
+        malWriteProc._libraryPayload = libraryPayload
+        malWriteProc._includeLibrary = includeLibrary === true
+        malWriteProc._nextCommand = _syncCommand(command, (includeLibrary ? [feedLibraryPath] : []).concat(extraArgs || []))
+        malWriteProc.command = includeLibrary
+            ? [
+                "sh", "-c",
+                "printf '%s' \"$1\" > \"$2\"\nprintf '%s' \"$3\" > \"$4\"",
+                "sh",
+                configPayload,
+                malConfigPath,
+                libraryPayload,
+                feedLibraryPath
+            ]
+            : [
+                "sh", "-c",
+                "printf '%s' \"$1\" > \"$2\"",
+                "sh",
+                configPayload,
+                malConfigPath
+            ]
+
+        isMalSyncBusy = true
+        if (malWriteProc.running) {
+            malWriteProc.running = false
+            Qt.callLater(function() { malWriteProc.running = true })
+        } else {
+            malWriteProc.running = true
+        }
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
+    function startMalAuth() {
+        if (String(malSync?.clientId || "").trim().length === 0) {
+            malSyncError = "MyAnimeList client id is required before connecting."
+            return
+        }
+        _queueMalCommand("auth-url", false, [], false)
+    }
+
+    function exchangeMalAuthCode() {
+        var code = String(malSyncAuthCode || "").trim()
+        if (code.length === 0) {
+            malSyncError = "Paste the authorization code from the browser redirect first."
+            return
+        }
+        _queueMalCommand("exchange", false, [code], true)
+    }
+
+    function refreshMalSyncSession(showToast) {
+        if (String(malSync?.refreshToken || "").length === 0 && String(malSync?.accessToken || "").length === 0) {
+            malSyncError = "Connect a MyAnimeList account before refreshing."
+            return
+        }
+        _queueMalCommand("refresh", false, [], showToast !== false)
+    }
+
+    function pushMalSync(showToast) {
+        if ((libraryList || []).length === 0) {
+            malSyncError = "Your library is empty."
+            return
+        }
+        if (!_malSyncReady()) {
+            malSyncError = "Connect MyAnimeList before pushing library progress."
+            return
+        }
+        _queueMalCommand("push", true, [], showToast !== false)
+    }
+
+    function pullMalSync(showToast) {
+        if ((libraryList || []).length === 0) {
+            malSyncError = "Your library is empty."
+            return
+        }
+        if (!_malSyncReady()) {
+            malSyncError = "Connect MyAnimeList before pulling progress."
+            return
+        }
+        _queueMalCommand("pull", true, [], showToast !== false)
+    }
+
     function fetchGenres() {
         if (genresList.length > 0) return
         genreProc._buf = ""
-        genreProc.command = ["python3", scriptPath, "genres"]
+        genreProc.command = _metadataCommand("genres")
         genreProc.running = true
     }
 
     function _runFeedCommand(forceRefresh) {
         feedProc._buf = ""
-        feedProc.command = [
-            "python3", scriptPath, "feed",
-            feedLibraryPath, currentMode, feedCachePath
-        ]
+        feedProc.command = _metadataCommand("feed", [
+            feedLibraryPath,
+            currentMode,
+            feedCachePath,
+            providerMappingPath,
+            streamProviderId
+        ])
         isFetchingFeed = true
         feedError = ""
         if (forceRefresh === true)
@@ -1062,8 +1703,11 @@ Item {
         if (!libraryLoaded) return
         if ((libraryList || []).length === 0) {
             feedList = []
+            feedUpcomingList = []
+            feedSummary = ({ alerts: 0, upcoming: 0, following: 0 })
             feedError = ""
             feedLastFetchedAt = Date.now()
+            feedUnreadCount = 0
             return
         }
         var now = Date.now()
@@ -1085,6 +1729,29 @@ Item {
         } else {
             feedWriteProc.running = true
         }
+    }
+
+    function markFeedNotificationsSeen() {
+        if ((feedList || []).length === 0)
+            return
+        var state = _normaliseFeedNotificationState(feedNotificationState)
+        var changed = false
+        for (var i = 0; i < feedList.length; i++) {
+            var item = feedList[i]
+            var mediaId = _feedMediaId(item)
+            var latestEpisode = _feedReleasedEpisode(item)
+            if (!mediaId || latestEpisode <= 0)
+                continue
+            var entry = _feedStateEntry(state, mediaId, true)
+            if (latestEpisode > Number(entry.lastSeenEpisode || 0)) {
+                entry.lastSeenEpisode = latestEpisode
+                changed = true
+            }
+        }
+        feedNotificationState = state
+        _recomputeFeedUnreadCount(feedList, feedNotificationState)
+        if (changed)
+            _saveFeedNotificationState()
     }
 
     function setGenre(genre) {
@@ -1109,9 +1776,13 @@ Item {
         browseFeed = "top"
         currentView = "top"
         currentSearchQuery = ""
-        var args = ["popular", String(_page), currentMode]
-        if (currentGenre) args.push(currentGenre)
-        _runBrowse(args, reset || _page === 1)
+        _runBrowse(_metadataCommand("popular", [
+            String(_page),
+            currentMode,
+            currentGenre || "",
+            providerMappingPath,
+            streamProviderId
+        ]), reset || _page === 1)
     }
 
     function fetchRecent(reset) {
@@ -1120,8 +1791,13 @@ Item {
         browseFeed = "recent"
         currentView = "recent"
         currentSearchQuery = ""
-        var args = ["recent", String(_page), currentMode, currentCountry]
-        _runBrowse(args, reset || _page === 1)
+        _runBrowse(_metadataCommand("recent", [
+            String(_page),
+            currentMode,
+            currentCountry,
+            providerMappingPath,
+            streamProviderId
+        ]), reset || _page === 1)
     }
 
     function fetchNextPage() {
@@ -1138,9 +1814,14 @@ Item {
         if (isFetchingAnime) return
         currentView = "search"
         currentSearchQuery = query
-        var args = ["search", query, currentMode, String(_page)]
-        if (currentGenre) args.push(currentGenre)
-        _runBrowse(args, reset || _page === 1)
+        _runBrowse(_metadataCommand("search", [
+            query,
+            currentMode,
+            String(_page),
+            currentGenre || "",
+            providerMappingPath,
+            streamProviderId
+        ]), reset || _page === 1)
     }
 
     function fetchAnimeDetail(show) {
@@ -1177,7 +1858,7 @@ Item {
     function _fetchAnimeDetail(show) {
         currentAnime = show
         detailError = ""
-        var cacheKey = _detailCacheKey(show?.id, currentMode)
+        var cacheKey = _detailCacheKey(show, currentMode)
         if (detailCache[cacheKey]) {
             var cachedDetail = _deepClone(detailCache[cacheKey])
             cachedDetail.episodes = _normaliseEpisodeList(cachedDetail.episodes || [])
@@ -1190,7 +1871,12 @@ Item {
         detailProc._buf  = ""
         detailProc._show = show
         detailProc._cacheKey = cacheKey
-        detailProc.command = ["python3", scriptPath, "episodes", show.id, currentMode]
+        detailProc.command = _showMetadataCommand(show, "episodes", [
+            _showMetadataId(show),
+            currentMode,
+            providerMappingPath,
+            _showStreamProviderId(show)
+        ])
         isFetchingDetail = true
         if (detailProc.running) {
             detailProc.running = false
@@ -1218,9 +1904,7 @@ Item {
         selectedLink    = null
         isFetchingLinks = true
         streamProc._buf  = ""
-        streamProc.command = ["python3", scriptPath, "stream",
-                              showId, String(epNum), currentMode,
-                              preferredProvider, "best"]
+        streamProc.command = _streamCommand(currentAnime, epNum)
         if (streamProc.running) {
             streamProc.running = false
             Qt.callLater(function() { streamProc.running = true })

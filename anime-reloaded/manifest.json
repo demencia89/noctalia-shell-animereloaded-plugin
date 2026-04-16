@@ -14,15 +14,14 @@
     "Entertainment"
   ],
   "entryPoints": {
-    "main": "anime-reloaded/Main.qml",
-    "barWidget": "anime-reloaded/BarWidget.qml",
-    "panel": "anime-reloaded/Panel.qml"
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml"
   },
   "dependencies": {
     "plugins": []
   },
   "metadata": {
-    "runtimeRoot": "anime-reloaded",
     "defaultSettings": {
       "mode": "sub",
       "preferredProvider": "auto",

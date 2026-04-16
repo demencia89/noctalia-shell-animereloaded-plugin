@@ -1,9 +1,9 @@
--- progress.lua — bundled with the Noctalia anime plugin
+-- progress.lua — bundled with the AnimeReloaded plugin
 -- Writes duration and playback position on exit so the plugin can track
 -- episode progress and resume playback.
 -- progress_file is passed via --script-opts=progress_file=<path>
 
-local progress_file = mp.get_opt("progress_file") or "/tmp/mpv-anime-progress.txt"
+local progress_file = mp.get_opt("progress_file") or "/tmp/mpv-anime-reloaded-progress.txt"
 local last_pos = 0
 local last_dur = 0
 

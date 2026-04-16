@@ -1,111 +1,116 @@
-# Anime Plugin for Noctalia
+# AnimeReloaded for Noctalia
 
-Anime is a Noctalia bar and panel plugin for browsing, tracking, and resuming anime with `mpv`, backed by AllAnime metadata and stream resolution.
+AnimeReloaded is the next-generation continuation of the original Noctalia Anime plugin.
 
-This repository is structured for submission to the Noctalia unofficial plugins ecosystem:
+It now runs as a hybrid provider plugin:
 
-- repository metadata lives at the root
-- the actual plugin runtime lives in [anime/](/home/ag/.config/noctalia/plugins/anime/anime)
-- registry automation lives in [.github/workflows/](/home/ag/.config/noctalia/plugins/anime/.github/workflows)
-- a root [manifest.json](/home/ag/.config/noctalia/plugins/anime/manifest.json) is kept only as a compatibility shim for local installs
+- AniList for metadata, search, relations, airing data, and feed decisions
+- AllAnime for episode lists, stream resolution, and playback
+- a local mapping/cache layer between AniList media ids and AllAnime show ids
 
-## Highlights
+## Current State
 
-- Browse popular and recent releases with infinite scroll, genre filtering, and sub/dub switching
-- Search from the Browse and Library tabs with quick keyboard-friendly entry points
-- Resume partially watched episodes from a Continue Watching rail on Browse
-- Open a detailed episode list with watched markers, progress indicators, and direct playback
-- Launch the next unwatched episode from the detail header
-- Keep a persistent library with per-show watched state and episode progress
-- Save playback provider priority
-- Restore panel and grid scroll positions when moving in and out of detail pages
-- Respect Noctalia theme roles so the plugin follows the color scheme selected in Noctalia Shell settings
+- Plugin id: `anime-reloaded`
+- Plugin name: `AnimeReloaded`
+- Runtime folder: `anime-reloaded/`
+- Current metadata provider: `anilist`
+- Current stream provider: `allanime`
+- Current playback path: Noctalia QML -> `provider_cli.py` -> AniList metadata -> AllAnime stream resolver -> `mpv`
+- Intended repository name: `noctalia-shell-plugin-animereloaded`
+- Current version: `2.2.0`
 
-## Requirements
+## Why This Repo Exists
 
-- `python3` in `$PATH`
-- `mpv` in `$PATH`
-- Network access to `api.allanime.day` and the resolved stream hosts
+- The original Anime plugin is still the stable baseline.
+- AnimeReloaded is the branch for the next refactor phase.
+- Playback stays on AllAnime so the working player flow is preserved.
+- Metadata has been moved to AniList so search, show detail, and feed logic can evolve independently from the stream backend.
+- The provider split is now concrete enough for future metadata improvements without rewriting playback again.
 
-## Installation
+## Hybrid Architecture
 
-### Custom repository source
+- `anime-reloaded/providers/anilist.py`
+  AniList-backed metadata provider for browse/search/detail/feed metadata.
+- `anime-reloaded/providers/allanime.py`
+  AllAnime metadata compatibility layer plus the active stream resolver.
+- `anime-reloaded/providers/anilist_allanime_mapper.py`
+  Lazy AniList -> AllAnime resolver used when detail or playback needs stream episodes.
+- `anime-reloaded/providers/allanime_anilist_mapper.py`
+  Pragmatic legacy AllAnime -> AniList mapper used to keep old library entries feed-compatible.
+- `anime-reloaded/providers/mapping_cache.py`
+  Local cache for cross-provider id mappings and mapping debug data.
 
-Add this repository as a custom plugin source in Noctalia:
+## Feed Behavior
 
-```text
-https://github.com/demencia89/noctalia-shell-anime-plugin.git
-```
+- Feed now uses AniList airing metadata instead of relying only on AllAnime episode snapshots.
+- Feed is limited to followed shows with a clear next-airing context and a recent watched position.
+- Legacy library entries that still point at AllAnime metadata are reverse-mapped into AniList when the mapping is confident.
+- Uncertain mappings are skipped instead of guessing.
 
-### Local checkout
+## MyAnimeList Sync
 
-Clone this repository into your local Noctalia plugins directory as `anime/`, then enable it from Noctalia's Plugins view.
+- AniList remains the canonical metadata source inside the plugin UI.
+- MyAnimeList is now an optional account sync target for the local library.
+- The first MAL sync pass is intentionally scoped:
+  - browser auth + manual code exchange from Settings
+  - explicit `Pull From MAL` and `Push To MAL` actions
+  - optional auto-push after local library changes
+  - sync only for library entries that already have a confident MAL mapping
 
-```text
-~/.config/noctalia/plugins/
-└── anime/
-    ├── manifest.json
-    ├── README.md
-    ├── anime/
-    │   ├── manifest.json
-    │   ├── Main.qml
-    │   ├── Panel.qml
-    │   ├── BarWidget.qml
-    │   ├── allanime.py
-    │   ├── progress.lua
-    │   └── components/
-    └── registry.json
-```
+This keeps the metadata/playback split intact:
 
-The root manifest exists so a local checkout loads directly. Runtime assets and QML entry points still live under [anime/](/home/ag/.config/noctalia/plugins/anime/anime).
+- AniList for search, detail, seasons, relations, airing data, and feed logic
+- AllAnime for episode lists, stream resolution, and playback
+- MyAnimeList for account-side watch progress synchronization
 
-## Usage
+## Current Limitations
 
-- Use `Browse` for discovery, recent releases, genre filters, and continue-watching shortcuts
-- Use `Library` for tracked shows, watched state, and library-only search
-- Use the detail panel to mark episodes watched, mark through the current episode, or play the next unwatched entry
-- Use `Settings` to tune panel size, poster size, and provider order
-
-## Settings
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `mode` | `sub` | Default playback mode: `sub` or `dub` |
-| `panelSize` | `medium` | Drawer width preset: `small`, `medium`, `large` |
-| `posterSize` | `medium` | Grid density preset: `small`, `medium`, `large` |
-| `preferredProvider` | `auto` | Preferred provider order with automatic fallback |
+- Playback still depends on AllAnime mappings existing or being resolved during detail fetch.
+- Legacy library entries are feed-compatible, but they are not fully migrated in-place to AniList ids yet.
+- Feed remains a pragmatic release alert list, not a full notification system yet.
+- MyAnimeList sync currently reconciles the existing local library; it does not import MAL-only titles into AnimeReloaded yet.
+- MAL sync skips entries that do not already expose a confident MAL id through AniList metadata.
 
 ## Repository Layout
 
 ```text
 .
-├── .github/workflows/      # registry automation
-├── anime/                  # actual plugin runtime for catalog installs
-├── LICENSE
+├── anime-reloaded/         # plugin runtime for catalog installs
+│   ├── provider_cli.py     # provider-aware command bridge used by QML
+│   ├── providers/          # metadata, stream, and mapping layers
+│   ├── Main.qml
+│   ├── Panel.qml
+│   ├── BarWidget.qml
+│   └── manifest.json
 ├── manifest.json           # local-install compatibility manifest
-├── README.md
-└── registry.json
+├── registry.json
+└── README.md
 ```
 
-## Maintainer Notes
+## Local Install
 
-- [anime/manifest.json](/home/ag/.config/noctalia/plugins/anime/anime/manifest.json) is the manifest that should be indexed by unofficial plugin tooling
-- [manifest.json](/home/ag/.config/noctalia/plugins/anime/manifest.json) exists only to keep a local checkout loadable inside `~/.config/noctalia/plugins/anime`
-- `registry.json` is generated by [.github/workflows/update-registry.js](/home/ag/.config/noctalia/plugins/anime/.github/workflows/update-registry.js)
-- Local watch progress is stored in `progress/` and local plugin settings are stored in `settings.json`; both are ignored by git
-- Stream URLs are resolved on demand and are never persisted to settings
+Clone this repository into your Noctalia plugins directory, then enable `AnimeReloaded` from the Plugins view.
 
-## Pre-Submission Check
+```text
+~/.config/noctalia/plugins/
+└── AnimeReloaded/
+```
 
-Before opening the unofficial-plugin PR, verify these flows in a clean shell restart:
+The root manifest keeps local checkouts loadable, while the actual plugin runtime stays in `anime-reloaded/`.
 
-1. The plugin appears in Noctalia and can be enabled from the Plugins view.
-2. Browse loads popular and recent feeds without duplicate content between the main Browse landing and the Recent feed.
-3. Search results open the correct detail page from both Browse and Library.
-4. Episode actions work correctly: play, mark watched, mark through current episode, and play next unwatched.
-5. Continue Watching appears on Browse and resumes the correct episode position.
-6. Panel size, poster size, library contents, and watched progress survive a shell restart.
+## Requirements
+
+- `python3` in `$PATH`
+- `mpv` in `$PATH`
+- Network access to `graphql.anilist.co`, `api.allanime.day`, and resolved stream hosts
+
+## Notes
+
+- `allanime.py` is still the playback backend.
+- Runtime feed/cache files now use `anime-reloaded-*` names inside the plugin directory.
+- Mapping cache entries are stored locally in `anime-reloaded-provider-map.json`.
+- `registry.json` is generated from the runtime manifest.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](/home/ag/.config/noctalia/plugins/anime/LICENSE).
+MIT. See `LICENSE`.

@@ -16,6 +16,7 @@ Item {
         anime && anime.currentAnime ? anime.isInLibrary(anime.currentAnime.id) : false
     readonly property var _nextEpisode:
         anime?.currentAnime ? anime.getNextUnwatchedEpisode(anime.currentAnime) : null
+    property string _lastCenteredSeasonKey: ""
 
     function centerPreferredEpisode(force) {
         if (!anime?.currentAnime || !epList.visible) return
@@ -53,6 +54,85 @@ Item {
             : ""
     }
 
+    function _seasonEntries() {
+        return anime?.currentAnime?.seasonEntries || []
+    }
+
+    function _seasonMetaText(item) {
+        if (!item) return ""
+        var season = item.season || ({})
+        var parts = []
+        if (season.quarter)
+            parts.push(season.quarter)
+        if (season.year)
+            parts.push(String(season.year))
+        if (item.type)
+            parts.push(String(item.type))
+        return parts.join(" · ")
+    }
+
+    function openSeason(item) {
+        if (!anime || !item || !item.id) return
+        var currentMetadataId = String(anime?.currentAnime?.providerRefs?.metadata?.id
+            || anime?.currentAnime?.id || "")
+        if (String(item.id) === currentMetadataId)
+            return
+        anime.fetchAnimeDetail({
+            id: item.id,
+            name: item.name || "",
+            englishName: item.englishName || "",
+            nativeName: item.nativeName || "",
+            thumbnail: item.thumbnail || "",
+            type: item.type || "",
+            season: item.season || null,
+            providerRefs: item.providerRefs || ({
+                metadata: { provider: "anilist", id: String(item.id) }
+            })
+        })
+    }
+
+    function centerCurrentSeason(force) {
+        if (!seasonList.visible) return
+        var seasons = detailView._seasonEntries()
+        if (!seasons || seasons.length <= 1) return
+        var currentMetadataId = String(anime?.currentAnime?.providerRefs?.metadata?.id
+            || anime?.currentAnime?.id || "")
+        var key = currentMetadataId + ":" + String(seasons.length)
+        if (!force && _lastCenteredSeasonKey === key)
+            return
+
+        var index = -1
+        for (var i = 0; i < seasons.length; i++) {
+            if (String(seasons[i].id || "") === currentMetadataId) {
+                index = i
+                break
+            }
+        }
+        if (index < 0) return
+
+        _lastCenteredSeasonKey = key
+        Qt.callLater(function() {
+            if (!seasonList.visible || seasonList.count <= index) return
+            seasonList.positionViewAtIndex(index, ListView.Center)
+        })
+    }
+
+    function horizontalWheelDelta(wheel) {
+        if (!wheel) return 0
+        var dy = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y : wheel.angleDelta.y
+        var dx = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.angleDelta.x
+        return Math.abs(dx) > Math.abs(dy) ? dx : dy
+    }
+
+    function scrollHorizontally(flickable, wheel) {
+        if (!flickable || !wheel) return
+        var delta = horizontalWheelDelta(wheel)
+        if (delta === 0) return
+        var maxX = Math.max(0, flickable.contentWidth - flickable.width)
+        flickable.contentX = Math.max(0, Math.min(maxX, flickable.contentX - delta))
+        wheel.accepted = true
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -74,35 +154,10 @@ Item {
                 spacing: 8
 
                 // Back button
-                Item {
-                    width: 38; height: 38
-                    readonly property bool hovered: backHover.hovered
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: 32
-                        height: 32
-                        radius: 16
-                        color: parent.hovered ? Color.mPrimaryContainer : "transparent"
-                        border.width: parent.hovered ? 1 : 0
-                        border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.25)
-                        scale: parent.hovered ? 1.06 : 1.0
-                        Behavior on color { ColorAnimation { duration: 130 } }
-                        Behavior on border.width { NumberAnimation { duration: 130 } }
-                        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "←"
-                        font.pixelSize: 18
-                        color: parent.hovered ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
-                        Behavior on color { ColorAnimation { duration: 130 } }
-                    }
-                    HoverHandler { id: backHover }
-                    MouseArea {
-                        id: backArea; anchors.fill: parent
-                        onClicked: detailView.backRequested()
-                    }
+                HoverIconButton {
+                    text: "←"
+                    iconPixelSize: 18
+                    onClicked: detailView.backRequested()
                 }
 
                 Rectangle {
@@ -131,98 +186,43 @@ Item {
                 }
 
                 // Library button
-                Item {
+                ActionChip {
                     visible: anime?.currentAnime != null && detailView._nextEpisode != null
-                    width: nextBtnLabel.implicitWidth + 34; height: 32
-
-                    Rectangle {
-                        anchors.fill: parent; radius: height / 2
-                        color: nextArea.containsMouse ? Color.mPrimaryContainer : Color.mSurface
-                        border.color: nextArea.containsMouse ? Color.mPrimary : Color.mOutlineVariant
-                        border.width: 1
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.color { ColorAnimation { duration: 180 } }
-                    }
-                    Row {
-                        anchors.centerIn: parent; spacing: 6
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "▶"
-                            font.pixelSize: 10; font.bold: true
-                            color: nextArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
-                        }
-                        Text {
-                            id: nextBtnLabel
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: detailView._nextEpisode
-                                ? "Next Ep. " + detailView._nextEpisode.number
-                                : "Next"
-                            font.pixelSize: 11; font.letterSpacing: 0.3
-                            color: nextArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
-                        }
-                    }
-                    MouseArea {
-                        id: nextArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (!anime?.currentAnime) return
-                            anime.playNextUnwatched(anime.currentAnime)
-                        }
+                    text: detailView._nextEpisode
+                        ? "Next Ep. " + detailView._nextEpisode.number
+                        : "Next"
+                    leadingText: "▶"
+                    fontPixelSize: 11
+                    letterSpacing: 0.3
+                    boldLabel: false
+                    horizontalPadding: 17
+                    controlHeight: 32
+                    onClicked: {
+                        if (!anime?.currentAnime) return
+                        anime.playNextUnwatched(anime.currentAnime)
                     }
                 }
 
-                Item {
+                ActionChip {
                     visible: anime?.currentAnime != null
-                    width: libBtnLabel.implicitWidth + 28; height: 32
-
-                    Rectangle {
-                        anchors.fill: parent; radius: height / 2
-                        color: detailView._inLibrary
-                            ? (libraryArea.containsMouse ? Color.mPrimary : Color.mPrimaryContainer)
-                            : (libraryArea.containsMouse ? Color.mPrimaryContainer : Color.mSurface)
-                        border.color: detailView._inLibrary || libraryArea.containsMouse ? Color.mPrimary : Color.mOutlineVariant
-                        border.width: 1
-                        Behavior on color { ColorAnimation { duration: 180 } }
-                        Behavior on border.color { ColorAnimation { duration: 180 } }
-                    }
-                    Row {
-                        anchors.centerIn: parent; spacing: 5
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: detailView._inLibrary ? "✓" : "+"
-                            font.pixelSize: 11; font.bold: true
-                            color: detailView._inLibrary
-                                ? (libraryArea.containsMouse ? Color.mOnPrimary : Color.mOnPrimaryContainer)
-                                : (libraryArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant)
-                            Behavior on color { ColorAnimation { duration: 180 } }
-                        }
-                        Text {
-                            id: libBtnLabel
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Library"
-                            font.pixelSize: 11; font.letterSpacing: 0.3
-                            color: detailView._inLibrary
-                                ? (libraryArea.containsMouse ? Color.mOnPrimary : Color.mOnPrimaryContainer)
-                                : (libraryArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant)
-                            Behavior on color { ColorAnimation { duration: 180 } }
-                        }
-                    }
-                    MouseArea {
-                        id: libraryArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (!anime?.currentAnime) return
-                            if (detailView._inLibrary)
-                                anime.removeFromLibrary(anime.currentAnime.id)
-                            else
-                                anime.addToLibrary(anime.currentAnime)
-                        }
+                    text: "Library"
+                    leadingText: detailView._inLibrary ? "✓" : "+"
+                    fontPixelSize: 11
+                    letterSpacing: 0.3
+                    boldLabel: false
+                    horizontalPadding: 14
+                    controlHeight: 32
+                    active: detailView._inLibrary
+                    activeColor: Color.mPrimaryContainer
+                    activeHoverColor: Color.mPrimary
+                    activeTextColor: Color.mOnPrimaryContainer
+                    activeHoverTextColor: Color.mOnPrimary
+                    onClicked: {
+                        if (!anime?.currentAnime) return
+                        if (detailView._inLibrary)
+                            anime.removeFromLibrary(anime.currentAnime.id)
+                        else
+                            anime.addToLibrary(anime.currentAnime)
                     }
                 }
             }
@@ -244,6 +244,8 @@ Item {
                 readonly property var libraryEntry: anime?.currentAnime
                     ? anime.getLibraryEntry(anime.currentAnime.id) : null
                 readonly property var episodeList: anime?.currentAnime?.episodes || []
+                readonly property var watchAction: anime?.currentAnime
+                    ? anime.getShowWatchAction(anime.currentAnime) : null
                 readonly property int lastWatchedIndex: {
                     if (!libraryEntry || !episodeList.length) return -1
                     for (var i = 0; i < episodeList.length; i++) {
@@ -260,6 +262,8 @@ Item {
                     }
                     return false
                 }
+                readonly property bool canApplyWatchAction:
+                    watchAction !== null && watchAction !== undefined && !watchAction.isComplete
 
                 Flow {
                     id: detailMetaFlow
@@ -303,41 +307,41 @@ Item {
                         }
                     }
 
-                    Rectangle {
-                        visible: detailMetaFlow.parent.hasOlderUnwatched
-                        height: 22
-                        width: catchUpText.implicitWidth + 22
-                        radius: 11
-                        color: catchUpArea.containsMouse ? Color.mPrimaryContainer : Color.mSurface
-                        border.color: catchUpArea.containsMouse ? Color.mPrimary : Color.mOutlineVariant
-                        border.width: 1
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                        Behavior on border.color { ColorAnimation { duration: 160 } }
-
-                        Text {
-                            id: catchUpText
-                            anchors.centerIn: parent
-                            text: "Mark 1→Last"
-                            font.pixelSize: 9
-                            font.letterSpacing: 0.6
-                            color: catchUpArea.containsMouse ? Color.mOnPrimaryContainer : Color.mOnSurfaceVariant
-                            Behavior on color { ColorAnimation { duration: 160 } }
+                    ActionChip {
+                        visible: detailMetaFlow.parent.watchAction !== null && detailMetaFlow.parent.watchAction !== undefined
+                        text: detailMetaFlow.parent.watchAction?.label || ""
+                        enabled: detailMetaFlow.parent.canApplyWatchAction
+                        disabledOpacity: detailMetaFlow.parent.watchAction?.isComplete ? 0.92 : 0.45
+                        active: detailMetaFlow.parent.watchAction?.isComplete || false
+                        activeColor: Color.mPrimaryContainer
+                        activeHoverColor: Color.mPrimaryContainer
+                        activeTextColor: Color.mOnPrimaryContainer
+                        activeHoverTextColor: Color.mOnPrimaryContainer
+                        controlHeight: 22
+                        horizontalPadding: 11
+                        fontPixelSize: 9
+                        letterSpacing: 0.6
+                        onClicked: {
+                            if (!anime?.currentAnime) return
+                            anime.applyShowWatchAction(anime.currentAnime)
                         }
+                    }
 
-                        MouseArea {
-                            id: catchUpArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (!anime?.currentAnime || !detailMetaFlow.parent.libraryEntry) return
-                                anime.markEpisodesThrough(
-                                    anime.currentAnime,
-                                    detailMetaFlow.parent.libraryEntry.lastWatchedEpId || "",
-                                    detailMetaFlow.parent.libraryEntry.lastWatchedEpNum || "",
-                                    detailMetaFlow.parent.lastWatchedIndex
-                                )
-                            }
+                    ActionChip {
+                        visible: detailMetaFlow.parent.hasOlderUnwatched
+                        text: "Mark 1→Last"
+                        controlHeight: 22
+                        horizontalPadding: 11
+                        fontPixelSize: 9
+                        letterSpacing: 0.6
+                        onClicked: {
+                            if (!anime?.currentAnime || !detailMetaFlow.parent.libraryEntry) return
+                            anime.markEpisodesThrough(
+                                anime.currentAnime,
+                                detailMetaFlow.parent.libraryEntry.lastWatchedEpId || "",
+                                detailMetaFlow.parent.libraryEntry.lastWatchedEpNum || "",
+                                detailMetaFlow.parent.lastWatchedIndex
+                            )
                         }
                     }
 
@@ -424,6 +428,123 @@ Item {
             Rectangle {
                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                 height: 1; color: Color.mOutlineVariant; opacity: 0.3
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: detailView._seasonEntries().length > 1
+            height: visible ? 92 : 0
+            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.72)
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                Text {
+                    text: "Seasons"
+                    font.pixelSize: 11
+                    font.letterSpacing: 1.2
+                    color: Color.mOnSurfaceVariant
+                    opacity: 0.82
+                }
+
+                ListView {
+                    id: seasonList
+                    width: parent.width
+                    height: 48
+                    orientation: ListView.Horizontal
+                    spacing: 8
+                    clip: true
+                    model: detailView._seasonEntries()
+                    boundsBehavior: Flickable.StopAtBounds
+                    flickableDirection: Flickable.HorizontalFlick
+                    onModelChanged: detailView.centerCurrentSeason(false)
+                    onVisibleChanged: if (visible) detailView.centerCurrentSeason(true)
+
+                    delegate: Rectangle {
+                        readonly property bool isCurrent:
+                            String(modelData.id || "") === String(anime?.currentAnime?.providerRefs?.metadata?.id
+                                || anime?.currentAnime?.id || "")
+                        readonly property bool hovered: seasonHover.hovered
+                        width: 168
+                        height: 48
+                        radius: 14
+                        color: isCurrent
+                            ? Color.mPrimary
+                            : (hovered
+                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18)
+                                : Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.82))
+                        border.width: 1
+                        border.color: isCurrent
+                            ? Color.mPrimary
+                            : (hovered
+                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.45)
+                                : Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.28))
+                        Behavior on color { ColorAnimation { duration: 140 } }
+                        Behavior on border.color { ColorAnimation { duration: 140 } }
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 9
+                            spacing: 2
+
+                            Text {
+                                text: modelData.englishName || modelData.name || ""
+                                font.pixelSize: 11
+                                font.bold: isCurrent
+                                color: isCurrent
+                                    ? Color.mOnPrimary
+                                    : (hovered ? Color.mPrimary : Color.mOnSurface)
+                                elide: Text.ElideRight
+                                Behavior on color { ColorAnimation { duration: 140 } }
+                            }
+
+                            Text {
+                                readonly property string seasonMetaText: detailView._seasonMetaText(modelData)
+                                text: isCurrent
+                                    ? (seasonMetaText.length > 0 ? "Current · " + seasonMetaText : "Current")
+                                    : seasonMetaText
+                                font.pixelSize: 9
+                                color: isCurrent
+                                    ? Color.mOnPrimary
+                                    : (hovered ? Color.mPrimary : Color.mOnSurfaceVariant)
+                                opacity: 0.8
+                                elide: Text.ElideRight
+                                Behavior on color { ColorAnimation { duration: 140 } }
+                            }
+                        }
+
+                        HoverHandler { id: seasonHover }
+
+                        MouseArea {
+                            id: seasonArea
+                            anchors.fill: parent
+                            enabled: !parent.isCurrent
+                            hoverEnabled: true
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: detailView.openSeason(modelData)
+                        }
+                    }
+
+                    ScrollBar.horizontal: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        onWheel: function(wheel) {
+                            detailView.scrollHorizontally(seasonList, wheel)
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                height: 1; color: Color.mOutlineVariant; opacity: 0.25
             }
         }
 

@@ -48,7 +48,7 @@ Item {
                 color: Color.mPrimary
             }
             NText {
-                text: "Anime"
+                text: "AnimeReloaded"
                 color: Color.mOnSurface
                 pointSize: root.barFontSize
             }
@@ -60,7 +60,7 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape:  Qt.PointingHandCursor
-        onEntered: TooltipService.show(root, "Anime browser", BarService.getTooltipDirection())
+        onEntered: TooltipService.show(root, "AnimeReloaded browser", BarService.getTooltipDirection())
         onExited:  TooltipService.hide()
         onClicked: {
             if (pluginApi) pluginApi.togglePanel(root.screen, null)

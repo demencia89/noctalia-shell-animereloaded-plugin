@@ -3,6 +3,10 @@
 settings.json
 anime-library.json
 anime-feed-cache.json
+anime-reloaded-library.json
+anime-reloaded-feed-cache.json
+anime-reloaded-provider-map.json
+anime-reloaded/anime-reloaded-anilist-cache.json
 progress/
 __pycache__/
 *.pyc

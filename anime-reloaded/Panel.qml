@@ -33,8 +33,10 @@ Item {
     property bool settingsOpen: false
 
     onTabIndexChanged: {
-        if (tabIndex === 2 && anime)
+        if (tabIndex === 2 && anime) {
             anime.fetchFollowingFeed(false)
+            anime.markFeedNotificationsSeen()
+        }
     }
 
     Rectangle {
@@ -253,6 +255,31 @@ Item {
                             }
 
                             Rectangle {
+                                visible: index === 2 && (anime?.feedUnreadCount ?? 0) > 0
+                                anchors {
+                                    top: parent.top
+                                    right: parent.right
+                                    topMargin: 6
+                                    rightMargin: Math.max(12, parent.width * 0.24)
+                                }
+                                height: 18
+                                width: Math.max(feedBadgeText.implicitWidth + 10, 18)
+                                radius: 9
+                                color: Color.mPrimary
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.4)
+
+                                Text {
+                                    id: feedBadgeText
+                                    anchors.centerIn: parent
+                                    text: (anime?.feedUnreadCount ?? 0) > 99 ? "99+" : String(anime?.feedUnreadCount ?? 0)
+                                    font.pixelSize: 8
+                                    font.bold: true
+                                    color: Color.mOnPrimary
+                                }
+                            }
+
+                            Rectangle {
                                 anchors { top: parent.top; horizontalCenter: parent.horizontalCenter }
                                 width:  active ? 28 : 0
                                 height: 2; radius: 1
@@ -267,8 +294,10 @@ Item {
                                 onClicked: {
                                     root.settingsOpen = false
                                     root.tabIndex = index
-                                    if (index === 2 && root.anime)
+                                    if (index === 2 && root.anime) {
                                         root.anime.fetchFollowingFeed(false)
+                                        root.anime.markFeedNotificationsSeen()
+                                    }
                                 }
                             }
                         }

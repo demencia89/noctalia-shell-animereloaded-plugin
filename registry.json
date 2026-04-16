@@ -2,13 +2,13 @@
   "version": 1,
   "plugins": [
     {
-      "id": "anime",
-      "name": "Anime",
-      "version": "1.1.0",
+      "id": "anime-reloaded",
+      "name": "AnimeReloaded",
+      "version": "2.1.0",
       "official": false,
       "author": "demencia89",
-      "description": "Browse, track, and resume anime from Noctalia with AllAnime and mpv.",
-      "repository": "https://github.com/demencia89/noctalia-shell-anime-plugin.git",
+      "description": "Hybrid AniList metadata and AllAnime playback plugin for Noctalia.",
+      "repository": "https://github.com/demencia89/noctalia-shell-plugin-animereloaded.git",
       "minNoctaliaVersion": "3.6.0",
       "license": "MIT",
       "tags": [
@@ -16,7 +16,7 @@
         "Panel",
         "Entertainment"
       ],
-      "lastUpdated": "2026-04-15T04:45:00-03:00"
+      "lastUpdated": "2026-04-15T08:49:39.168Z"
     }
   ]
 }

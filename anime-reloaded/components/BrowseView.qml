@@ -10,6 +10,7 @@ Item {
 
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
+    property int _lastBrowseResetToken: -1
 
     signal animeSelected(var show)
     signal settingsRequested()
@@ -25,7 +26,8 @@ Item {
             type: entry.type || "",
             episodeCount: entry.episodeCount || "",
             availableEpisodes: entry.availableEpisodes || { sub: 0, dub: 0, raw: 0 },
-            season: entry.season || null
+            season: entry.season || null,
+            providerRefs: entry.providerRefs || ({})
         })
     }
 
@@ -72,6 +74,77 @@ Item {
         var maxX = Math.max(0, flickable.contentWidth - flickable.width)
         flickable.contentX = Math.max(0, Math.min(maxX, flickable.contentX - delta))
         wheel.accepted = true
+    }
+
+    function _serialiseBrowseEntry(entry) {
+        try {
+            return JSON.stringify(entry || {})
+        } catch (e) {
+            return "{}"
+        }
+    }
+
+    function _parseBrowseEntry(payload) {
+        try {
+            return JSON.parse(payload || "{}")
+        } catch (e) {
+            return ({})
+        }
+    }
+
+    function _appendBrowseEntries(results, startIndex) {
+        var items = results || []
+        for (var i = startIndex || 0; i < items.length; i++) {
+            var entry = items[i] || ({})
+            animeGridModel.append({
+                entryId: String(entry.id || ""),
+                entryJson: _serialiseBrowseEntry(entry)
+            })
+        }
+    }
+
+    function syncBrowseModel(forceReset) {
+        var results = anime?.animeList || []
+        var resetToken = anime?.browseResetToken || 0
+        var shouldReset = forceReset === true
+            || resetToken !== _lastBrowseResetToken
+            || results.length < animeGridModel.count
+
+        if (!shouldReset && results.length === animeGridModel.count && animeGridModel.count > 0) {
+            var firstId = String((results[0] || {}).id || "")
+            var lastId = String((results[results.length - 1] || {}).id || "")
+            shouldReset = firstId !== String(animeGridModel.get(0).entryId || "")
+                || lastId !== String(animeGridModel.get(animeGridModel.count - 1).entryId || "")
+        }
+
+        if (shouldReset) {
+            animeGridModel.clear()
+            _lastBrowseResetToken = resetToken
+            _appendBrowseEntries(results, 0)
+            return
+        }
+
+        if (results.length > animeGridModel.count)
+            _appendBrowseEntries(results, animeGridModel.count)
+    }
+
+    onAnimeChanged: {
+        _lastBrowseResetToken = anime ? (anime.browseResetToken || 0) : -1
+        animeGridModel.clear()
+        syncBrowseModel(true)
+    }
+
+    ListModel {
+        id: animeGridModel
+    }
+
+    Connections {
+        target: anime
+        ignoreUnknownSignals: true
+
+        function onAnimeListChanged() {
+            browseView.syncBrowseModel(false)
+        }
     }
 
     TapHandler {
@@ -749,7 +822,7 @@ Item {
                     // Loading
                     Rectangle {
                         anchors.fill: parent; color: "transparent"
-                        visible: (anime?.isFetchingAnime ?? false) && (anime?.animeList?.length ?? 0) === 0
+                        visible: (anime?.isFetchingAnime ?? false) && animeGridModel.count === 0
                         z: 10
 
                         Column {
@@ -804,12 +877,23 @@ Item {
                         
                         readonly property var columnsMap: ({ "small": 8, "medium": 5, "large": 3 })
                         readonly property int columns: columnsMap[anime?.posterSize || "medium"]
+                        property real lastStableContentY: 0
+                        property real lastContentHeight: 0
+                        property bool preserveScrollOnAppend: false
                         
                         cellWidth: (width - 10) / columns
                         cellHeight: cellWidth * 1.58
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
-                        model: anime?.animeList ?? []
+                        model: animeGridModel
+
+                        function requestNextPage() {
+                            if (!anime || anime.isFetchingAnime)
+                                return
+                            preserveScrollOnAppend = true
+                            lastStableContentY = Math.max(lastStableContentY, contentY)
+                            anime.fetchNextPage()
+                        }
 
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AsNeeded
@@ -819,13 +903,22 @@ Item {
                         }
 
                         onContentYChanged: {
-                            if (anime) anime.setBrowseScroll(contentY)
+                            var transientReset = preserveScrollOnAppend
+                                && (anime?.isFetchingAnime ?? false)
+                                && contentY <= 0
+                                && lastStableContentY > 0
+                            if (!transientReset)
+                                lastStableContentY = Math.max(lastStableContentY, contentY)
+                            if (anime && !transientReset)
+                                anime.setBrowseScroll(contentY)
                             if (contentY + height > contentHeight - cellHeight * 2)
-                                if (anime) anime.fetchNextPage()
+                                requestNextPage()
                         }
 
                         onVisibleChanged: {
                             if (!visible || !anime) return
+                            preserveScrollOnAppend = false
+                            lastStableContentY = anime.browseScrollY || 0
                             Qt.callLater(function() {
                                 animeGrid.contentY = Math.min(
                                     anime.browseScrollY || 0,
@@ -835,23 +928,31 @@ Item {
                         }
 
                         onContentHeightChanged: {
-                            if (!visible || !anime) return
-                            if ((anime.browseScrollY || 0) <= 0) return
-                            Qt.callLater(function() {
-                                animeGrid.contentY = Math.min(
-                                    anime.browseScrollY || 0,
-                                    Math.max(0, animeGrid.contentHeight - animeGrid.height)
+                            if (preserveScrollOnAppend && contentHeight > lastContentHeight) {
+                                var targetY = Math.min(
+                                    lastStableContentY,
+                                    Math.max(0, contentHeight - height)
                                 )
-                            })
+                                if (animeGrid.contentY + 2 < targetY) {
+                                    Qt.callLater(function() {
+                                        animeGrid.contentY = targetY
+                                        if (anime)
+                                            anime.setBrowseScroll(targetY)
+                                    })
+                                }
+                                preserveScrollOnAppend = false
+                            }
+                            lastContentHeight = contentHeight
                         }
 
                         delegate: Item {
                             width: animeGrid.cellWidth
                             height: animeGrid.cellHeight
+                            readonly property var entry: browseView._parseBrowseEntry(entryJson)
 
                             readonly property bool inLibrary: {
                                 var _ = anime?.libraryVersion ?? 0
-                                return anime?.isInLibrary(modelData.id) ?? false
+                                return anime?.isInLibrary(entryId) ?? false
                             }
                             readonly property bool cardHovered: cardArea.containsMouse || libraryActionArea.containsMouse
                             readonly property bool showLibraryAction: inLibrary || cardHovered
@@ -877,7 +978,7 @@ Item {
                                             verticalCenter: parent.verticalCenter
                                             leftMargin: 8; rightMargin: 8
                                         }
-                                        text: modelData.englishName || modelData.name || ""
+                                        text: entry.englishName || entry.name || ""
                                         font.pixelSize: 10; font.letterSpacing: 0.2
                                         color: Color.mOnSurface
                                         wrapMode: Text.Wrap; maximumLineCount: 2
@@ -902,7 +1003,7 @@ Item {
                                     Image {
                                         id: coverImg
                                         anchors.fill: parent
-                                        source: modelData.thumbnail || ""
+                                        source: entry.thumbnail || ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true; cache: true
                                         opacity: status === Image.Ready ? 1 : 0
@@ -919,7 +1020,7 @@ Item {
 
                                         // Score badge
                                         Rectangle {
-                                            visible: modelData.score != null
+                                            visible: entry.score != null
                                             anchors { top: parent.top; left: parent.left; topMargin: 6; leftMargin: 6 }
                                             height: 18; radius: 9
                                             width: scoreText.implicitWidth + 10
@@ -929,7 +1030,7 @@ Item {
 
                                             Text {
                                                 id: scoreText; anchors.centerIn: parent
-                                                text: modelData.score != null ? "★ " + (modelData.score || 0).toFixed(1) : ""
+                                                text: entry.score != null ? "★ " + (entry.score || 0).toFixed(1) : ""
                                                 font.pixelSize: 8; font.bold: true; font.letterSpacing: 0.5
                                                 color: Color.mPrimary
                                             }
@@ -937,7 +1038,7 @@ Item {
 
                                         // Type badge
                                         Rectangle {
-                                            visible: (modelData.type || "").length > 0
+                                            visible: (entry.type || "").length > 0
                                             anchors { top: parent.top; right: parent.right; topMargin: 6; rightMargin: 6 }
                                             height: 18; radius: 9
                                             width: typeText.implicitWidth + 10
@@ -947,7 +1048,7 @@ Item {
 
                                             Text {
                                                 id: typeText; anchors.centerIn: parent
-                                                text: (modelData.type || "").toUpperCase()
+                                                text: (entry.type || "").toUpperCase()
                                                 font.pixelSize: 8; font.letterSpacing: 1; font.bold: true
                                                 color: Color.mPrimary
                                             }
@@ -955,9 +1056,21 @@ Item {
 
                                         // Episode count badge
                                         Rectangle {
-                                            visible: modelData.availableEpisodes &&
-                                                ((modelData.availableEpisodes.sub > 0) ||
-                                                 (modelData.availableEpisodes.dub > 0))
+                                            readonly property int displayEpisodeCount: {
+                                                var avail = entry.availableEpisodes || ({})
+                                                var modeCount = (anime?.currentMode === "dub")
+                                                    ? (avail.dub || 0)
+                                                    : (avail.sub || 0)
+                                                var fallback = Math.max(
+                                                    modeCount,
+                                                    avail.sub || 0,
+                                                    avail.dub || 0,
+                                                    avail.raw || 0,
+                                                    Number(entry.episodeCount || 0)
+                                                )
+                                                return fallback
+                                            }
+                                            visible: displayEpisodeCount > 0
                                             anchors {
                                                 bottom: parent.bottom; right: parent.right
                                                 bottomMargin: 6; rightMargin: 6
@@ -970,11 +1083,7 @@ Item {
 
                                             Text {
                                                 id: epText; anchors.centerIn: parent
-                                                text: {
-                                                    var avail = modelData.availableEpisodes
-                                                    var n = (anime?.currentMode === "dub") ? avail.dub : avail.sub
-                                                    return n + " ep"
-                                                }
+                                                text: displayEpisodeCount + " ep"
                                                 font.pixelSize: 8; font.letterSpacing: 0.5
                                                 color: Color.mOnSurface
                                             }
@@ -1065,9 +1174,9 @@ Item {
                                         onClicked: {
                                             if (!anime) return
                                             if (inLibrary)
-                                                anime.removeFromLibrary(modelData.id)
+                                                anime.removeFromLibrary(entryId)
                                             else
-                                                anime.addToLibrary(modelData)
+                                                anime.addToLibrary(entry)
                                         }
                                     }
                                 }
@@ -1090,7 +1199,7 @@ Item {
                                 MouseArea {
                                     id: cardArea
                                     anchors.fill: parent; hoverEnabled: true
-                                    onClicked: browseView.animeSelected(modelData)
+                                    onClicked: browseView.openEntry(entry)
                                             }
                                         }
                                     }

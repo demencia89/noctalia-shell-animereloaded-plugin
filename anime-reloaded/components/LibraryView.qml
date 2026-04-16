@@ -11,6 +11,25 @@ Item {
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
     property string librarySearchQuery: ""
+    property string progressFilter: "all"
+    property string typeFilter: "all"
+    readonly property var progressFilterOptions: [
+        { key: "all", label: "All" },
+        { key: "not-started", label: "Not Started" },
+        { key: "continue", label: "Continue" },
+        { key: "in-progress", label: "In Progress" },
+        { key: "up-to-date", label: "Up to Date" },
+        { key: "completed", label: "Completed" }
+    ]
+    readonly property var typeFilterOptions: [
+        { key: "all", label: "All Types" },
+        { key: "tv", label: "TV" },
+        { key: "short", label: "Short / ONA" },
+        { key: "movie", label: "Movie / OVA" },
+        { key: "other", label: "Other" }
+    ]
+    readonly property bool hasActiveFilters:
+        progressFilter !== "all" || typeFilter !== "all"
 
     signal animeSelected(var show)
     signal settingsRequested()
@@ -26,15 +45,19 @@ Item {
             type:             entry.type || "",
             episodeCount:     entry.episodeCount || "",
             availableEpisodes: entry.availableEpisodes || { sub: 0, dub: 0, raw: 0 },
-            season:           entry.season || null
+            season:           entry.season || null,
+            providerRefs:     entry.providerRefs || ({})
         })
     }
 
     function filteredLibraryEntries() {
         var entries = anime?.libraryList ?? []
         var query = (librarySearchQuery || "").trim().toLowerCase()
-        if (query.length === 0) return entries
         return entries.filter(function(entry) {
+            if (!_matchesProgressFilter(entry) || !_matchesTypeFilter(entry))
+                return false
+            if (query.length === 0)
+                return true
             var haystack = [
                 entry.englishName || "",
                 entry.name || "",
@@ -42,6 +65,108 @@ Item {
             ].join(" ").toLowerCase()
             return haystack.indexOf(query) !== -1
         })
+    }
+
+    function resetFilters() {
+        progressFilter = "all"
+        typeFilter = "all"
+    }
+
+    function _numericValue(value) {
+        var parsed = Number(value)
+        return isFinite(parsed) ? parsed : 0
+    }
+
+    function _entryLastWatched(entry) {
+        return _numericValue(entry?.lastWatchedEpNum || 0)
+    }
+
+    function _entryWatchedCount(entry) {
+        var watched = entry?.watchedEpisodes || []
+        var seen = {}
+        var total = 0
+        for (var i = 0; i < watched.length; i++) {
+            var number = String(watched[i] || "")
+            if (!number || seen[number])
+                continue
+            seen[number] = true
+            total++
+        }
+        return total
+    }
+
+    function _entryHasActiveProgress(entry) {
+        var progress = entry?.episodeProgress || {}
+        var keys = Object.keys(progress)
+        for (var i = 0; i < keys.length; i++) {
+            if ((anime?.getEpisodeProgress(entry.id, keys[i]) || 0) > 0)
+                return true
+        }
+        return false
+    }
+
+    function _entryStarted(entry) {
+        return _entryWatchedCount(entry) > 0 ||
+            _entryLastWatched(entry) > 0 ||
+            _entryHasActiveProgress(entry)
+    }
+
+    function _entryAvailableCount(entry) {
+        var mode = anime?.currentMode || "sub"
+        var available = entry?.availableEpisodes || {}
+        var count = _numericValue(available[mode] || 0)
+        if (count <= 0)
+            count = _numericValue(available.sub || available.raw || 0)
+        return count
+    }
+
+    function _entryCompleted(entry) {
+        var totalEpisodes = _numericValue(entry?.episodeCount || 0)
+        if (totalEpisodes <= 0)
+            return false
+        return _entryWatchedCount(entry) >= totalEpisodes
+    }
+
+    function _entryUpToDate(entry) {
+        if (!_entryStarted(entry) || _entryCompleted(entry))
+            return false
+        var available = _entryAvailableCount(entry)
+        if (available <= 0)
+            return false
+        return _entryWatchedCount(entry) >= available ||
+            _entryLastWatched(entry) >= available
+    }
+
+    function _matchesProgressFilter(entry) {
+        switch (progressFilter) {
+        case "not-started":
+            return !_entryStarted(entry)
+        case "continue":
+            return _entryHasActiveProgress(entry)
+        case "in-progress":
+            return _entryStarted(entry) && !_entryCompleted(entry) && !_entryUpToDate(entry)
+        case "up-to-date":
+            return _entryUpToDate(entry)
+        case "completed":
+            return _entryCompleted(entry)
+        default:
+            return true
+        }
+    }
+
+    function _entryTypeGroup(entry) {
+        var type = String(entry?.type || "").toUpperCase()
+        if (type === "TV")
+            return "tv"
+        if (type === "TV_SHORT" || type === "ONA")
+            return "short"
+        if (type === "MOVIE" || type === "OVA")
+            return "movie"
+        return "other"
+    }
+
+    function _matchesTypeFilter(entry) {
+        return typeFilter === "all" || _entryTypeGroup(entry) === typeFilter
     }
 
     function openSearch() {
@@ -218,7 +343,13 @@ Item {
 
                     Text {
                         id: libCountText; anchors.centerIn: parent
-                        text: (anime?.libraryList?.length ?? 0) + " saved"
+                        text: {
+                            var total = anime?.libraryList?.length ?? 0
+                            var filtered = libraryView.filteredLibraryEntries().length
+                            if (libraryView.hasActiveFilters || (libraryView.librarySearchQuery || "").trim().length > 0)
+                                return filtered + " of " + total
+                            return total + " saved"
+                        }
                         font.pixelSize: 10
                         font.letterSpacing: 0.5
                         color: Color.mOnSurfaceVariant
@@ -293,6 +424,177 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: libraryView.settingsRequested()
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            visible: (anime?.libraryList?.length ?? 0) > 0
+            readonly property bool singleRowLayout: width >= 920
+            implicitHeight: filterColumn.implicitHeight + 20
+            height: visible ? implicitHeight : 0
+            color: "transparent"
+            clip: true
+
+            Rectangle {
+                anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
+                height: 1
+                color: Color.mOutlineVariant
+                opacity: 0.32
+            }
+
+            Column {
+                id: filterColumn
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    leftMargin: 16
+                    rightMargin: 16
+                    topMargin: 10
+                }
+                spacing: 8
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    Text {
+                        id: filtersTitleText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Filters"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.letterSpacing: 0.8
+                        color: Color.mOnSurface
+                        opacity: 0.9
+                    }
+
+                    Item {
+                        width: Math.max(
+                            0,
+                            parent.width
+                                - filtersTitleText.implicitWidth
+                                - (libraryView.hasActiveFilters ? resetFiltersChip.implicitWidth : 0)
+                                - parent.spacing
+                        )
+                        height: 1
+                    }
+
+                    ActionChip {
+                        id: resetFiltersChip
+                        visible: libraryView.hasActiveFilters
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Reset"
+                        controlHeight: 24
+                        horizontalPadding: 10
+                        fontPixelSize: 9
+                        letterSpacing: 0.5
+                        boldLabel: false
+                        onClicked: libraryView.resetFilters()
+                    }
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: 10
+
+                    Item {
+                        width: parent.parent.parent.singleRowLayout
+                            ? Math.floor((parent.width - parent.spacing) * 0.58)
+                            : parent.width
+                        height: progressCard.implicitHeight
+
+                        Rectangle {
+                            id: progressCard
+                            width: parent.width
+                            implicitHeight: progressColumn.implicitHeight + 20
+                            radius: 18
+                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.52)
+                            border.width: 1
+                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+
+                            Column {
+                                id: progressColumn
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 8
+
+                                Text {
+                                    text: "Progress"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    font.letterSpacing: 0.7
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.8
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    Repeater {
+                                        model: libraryView.progressFilterOptions
+
+                                        delegate: ChoiceChip {
+                                            text: modelData.label
+                                            selected: libraryView.progressFilter === modelData.key
+                                            onClicked: libraryView.progressFilter = modelData.key
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        width: parent.parent.parent.singleRowLayout
+                            ? (parent.width - Math.floor((parent.width - parent.spacing) * 0.58) - parent.spacing)
+                            : parent.width
+                        height: typeCard.implicitHeight
+
+                        Rectangle {
+                            id: typeCard
+                            width: parent.width
+                            implicitHeight: typeColumn.implicitHeight + 20
+                            radius: 18
+                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.52)
+                            border.width: 1
+                            border.color: Qt.rgba(Color.mOutlineVariant.r, Color.mOutlineVariant.g, Color.mOutlineVariant.b, 0.34)
+
+                            Column {
+                                id: typeColumn
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 8
+
+                                Text {
+                                    text: "Type"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    font.letterSpacing: 0.7
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.8
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    Repeater {
+                                        model: libraryView.typeFilterOptions
+
+                                        delegate: ChoiceChip {
+                                            text: modelData.label
+                                            selected: libraryView.typeFilter === modelData.key
+                                            onClicked: libraryView.typeFilter = modelData.key
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -378,15 +680,13 @@ Item {
             Layout.fillHeight: true
             visible: (anime?.libraryList?.length ?? 0) > 0
 
-            ColumnLayout {
+            Item {
                 anchors.fill: parent
-                spacing: 0
 
-                // ── Library grid ──────────────────────────────────────────
                 Item {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: libraryView.filteredLibraryEntries().length === 0
+                    z: 2
 
                     Column {
                         anchors.centerIn: parent
@@ -404,7 +704,9 @@ Item {
                             width: 280
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            text: "Try a different title, English name, or native name."
+                            text: (libraryView.hasActiveFilters || (libraryView.librarySearchQuery || "").trim().length > 0)
+                                ? "Try a different title or loosen the active filters."
+                                : "Try a different title, English name, or native name."
                             font.pixelSize: 11
                             color: Color.mOnSurfaceVariant
                             opacity: 0.74
@@ -414,8 +716,7 @@ Item {
 
                 GridView {
                     id: libGrid
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    anchors.fill: parent
                     visible: libraryView.filteredLibraryEntries().length > 0
                     topMargin: 10
                     leftMargin: 8

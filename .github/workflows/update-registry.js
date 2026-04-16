@@ -14,9 +14,18 @@ function getLastCommitDate(filePath) {
       cwd: ROOT_DIR,
       encoding: 'utf8'
     }).trim();
-    return result || null;
+    if (result) return result;
   } catch (_) {
-    return null;
+    // fall through to the filesystem timestamp
+  }
+  try {
+    return fs.statSync(filePath).mtime.toISOString();
+  } catch (_) {
+    try {
+      return new Date().toISOString();
+    } catch (_) {
+      return null;
+    }
   }
 }
 
