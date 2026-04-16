@@ -32,7 +32,6 @@
 ## Playback Checks
 
 - Start playback from an AniList-backed title that already has an AllAnime mapping
-- Start playback from a title that requires cached mapping repair and confirm the episode resolves after repair
 - Confirm watched progress updates local library status and, when enabled, auto-push queues after a local change
 
 ## Release Gate

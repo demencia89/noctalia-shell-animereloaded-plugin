@@ -8,13 +8,23 @@ import "MalStatus.js" as MalStatus
 Item {
     id: root
 
-    readonly property string defaultMalBackendUrl: "https://dns.bogglemind.top:8443"
-    readonly property var legacyMalBackendUrls: ([
-        "https://auth.bogglemind.top",
-        "https://auth.bogglemind.top:8443"
-    ])
-
     property var pluginApi: null
+    readonly property var malSyncManifestConfig: {
+        var config = pluginApi?.manifest?.metadata?.malSync
+        return (config && typeof config === "object" && !Array.isArray(config))
+            ? config
+            : ({})
+    }
+    readonly property string defaultMalBackendUrl:
+        String(malSyncManifestConfig.defaultBackendUrl || "").trim().replace(/\/+$/, "")
+    readonly property var legacyMalBackendUrls: {
+        var urls = malSyncManifestConfig.legacyBackendUrls
+        if (!Array.isArray(urls))
+            return []
+        return urls
+            .map(function(url) { return String(url || "").trim().replace(/\/+$/, "") })
+            .filter(function(url, index, items) { return url.length > 0 && items.indexOf(url) === index })
+    }
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
     readonly property int librarySchemaVersion: 2
@@ -256,106 +266,6 @@ Item {
             _showMetadataId(entry),
             String(entry?.id || "")
         ].join("\u241f")
-    }
-
-    function _hasResolvedPlaybackMapping(entry) {
-        if (!entry)
-            return false
-        var metadataProvider = _showMetadataProviderId(entry)
-        var metadataId = _showMetadataId(entry)
-        if (metadataProvider === "allanime" && metadataId.length > 0)
-            return true
-        var streamRef = entry?.providerRefs?.stream
-        return String(streamRef?.provider || "") === "allanime"
-            && String(streamRef?.id || "").length > 0
-    }
-
-    function unresolvedPlaybackEntries() {
-        return (libraryList || []).filter(function(entry) {
-            return !_hasResolvedPlaybackMapping(entry)
-        })
-    }
-
-    function unresolvedPlaybackCount() {
-        return unresolvedPlaybackEntries().length
-    }
-
-    function _finishMappingRepair() {
-        isRepairingMappings = false
-        var changed = false
-        if (_isObject(_mappingRepairUpdates) && Object.keys(_mappingRepairUpdates).length > 0) {
-            libraryList = (libraryList || []).map(function(entry) {
-                var updatedRefs = _mappingRepairUpdates[_entryRepairKey(entry)]
-                if (!updatedRefs)
-                    return entry
-                changed = true
-                return _mergeLibraryEntry(entry, {
-                    providerRefs: _deepClone(updatedRefs),
-                    updatedAt: Date.now()
-                })
-            })
-            if (changed)
-                _saveLibrary(true)
-        }
-        _mappingRepairQueue = []
-        _mappingRepairUpdates = ({})
-        _mappingRepairCurrentKey = ""
-    }
-
-    function _runNextMappingRepair() {
-        if (!isRepairingMappings)
-            return
-        if ((_mappingRepairQueue || []).length === 0) {
-            _finishMappingRepair()
-            var repaired = Number(mappingRepairSummary?.repaired || 0)
-            var unresolved = Number(mappingRepairSummary?.unresolved || 0)
-            var failed = Number(mappingRepairSummary?.failed || 0)
-            if (repaired > 0)
-                mappingRepairMessage = "Repaired " + repaired + " playback mapping" + (repaired === 1 ? "" : "s") + "."
-            else if (unresolved > 0 || failed > 0)
-                mappingRepairMessage = "No additional playback mappings could be repaired automatically."
-            else
-                mappingRepairMessage = "Library playback mappings are already healthy."
-            return
-        }
-
-        var entry = _mappingRepairQueue.shift()
-        _mappingRepairCurrentKey = _entryRepairKey(entry)
-        mappingRepairProc._buf = ""
-        mappingRepairProc._entry = entry
-        mappingRepairProc.command = _showMetadataCommand(entry, "episodes", [
-            _showMetadataId(entry),
-            currentMode,
-            providerMappingPath,
-            _showStreamProviderId(entry)
-        ])
-        if (mappingRepairProc.running) {
-            mappingRepairProc.running = false
-            Qt.callLater(function() { mappingRepairProc.running = true })
-        } else {
-            mappingRepairProc.running = true
-        }
-    }
-
-    function repairPlaybackMappings() {
-        var queue = unresolvedPlaybackEntries()
-        mappingRepairSummary = {
-            scanned: queue.length,
-            repaired: 0,
-            unresolved: 0,
-            failed: 0
-        }
-        mappingRepairError = ""
-        if (queue.length === 0) {
-            mappingRepairMessage = "All library titles already have playback mappings."
-            return
-        }
-        mappingRepairMessage = "Checking " + queue.length + " library title" + (queue.length === 1 ? "" : "s") + " for playable mappings..."
-        _mappingRepairQueue = queue.slice()
-        _mappingRepairUpdates = ({})
-        _mappingRepairCurrentKey = ""
-        isRepairingMappings = true
-        _runNextMappingRepair()
     }
 
     IpcHandler {
@@ -1053,15 +963,6 @@ Item {
     property bool   _suppressMalAutoPush: false
     property bool   _pendingMalBrowserAuth: false
     property string _pendingMalBrowserAuthUrl: ""
-
-    // ── Playback mapping repair ──────────────────────────────────────────────
-    property bool   isRepairingMappings: false
-    property var    mappingRepairSummary: ({ scanned: 0, repaired: 0, unresolved: 0, failed: 0 })
-    property string mappingRepairMessage: ""
-    property string mappingRepairError: ""
-    property var    _mappingRepairQueue: []
-    property var    _mappingRepairUpdates: ({})
-    property string _mappingRepairCurrentKey: ""
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -2084,69 +1985,6 @@ Item {
         stderr: SplitParser {
             onRead: function(data) {
                 if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist browser auth:", data)
-            }
-        }
-    }
-
-    Process {
-        id: mappingRepairProc
-        property string _buf: ""
-        property var _entry: null
-
-        onRunningChanged: {
-            if (running)
-                return
-            if (!root.isRepairingMappings)
-                return
-
-            var summary = root._deepClone(root.mappingRepairSummary || ({ scanned: 0, repaired: 0, unresolved: 0, failed: 0 }))
-            var entry = _entry
-
-            if (_buf.length === 0) {
-                summary.failed = Number(summary.failed || 0) + 1
-                root.mappingRepairError = "Playback mapping repair returned no data for " + root._showTitle(entry) + "."
-            } else {
-                try {
-                    var d = JSON.parse(_buf)
-                    if (d.error) {
-                        summary.failed = Number(summary.failed || 0) + 1
-                        root.mappingRepairError = String(d.error || "Playback mapping repair failed.")
-                    } else if (root._hasResolvedPlaybackMapping(d)) {
-                        summary.repaired = Number(summary.repaired || 0) + 1
-                        if (d.providerRefs)
-                            root._mappingRepairUpdates[root._entryRepairKey(entry)] = root._deepClone(d.providerRefs)
-                        if (root.currentAnime && root._entryRepairKey(root.currentAnime) === root._entryRepairKey(entry)) {
-                            root.currentAnime = Object.assign({}, root.currentAnime, {
-                                providerRefs: root._deepClone(d.providerRefs || root.currentAnime.providerRefs || {})
-                            })
-                        }
-                    } else {
-                        summary.unresolved = Number(summary.unresolved || 0) + 1
-                    }
-                } catch (e) {
-                    summary.failed = Number(summary.failed || 0) + 1
-                    root.mappingRepairError = "Playback mapping repair parse error: " + e
-                    Logger.w("AnimeReloaded", "mapping repair parse error:", e)
-                }
-            }
-
-            root.mappingRepairSummary = summary
-            root.mappingRepairMessage = "Processed "
-                + (Number(summary.repaired || 0) + Number(summary.unresolved || 0) + Number(summary.failed || 0))
-                + " of " + Number(summary.scanned || 0)
-                + " unresolved title" + (Number(summary.scanned || 0) === 1 ? "" : "s") + "."
-            _entry = null
-            _buf = ""
-            Qt.callLater(root._runNextMappingRepair)
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { mappingRepairProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0)
-                    Logger.w("AnimeReloaded", "mapping repair:", data)
             }
         }
     }
