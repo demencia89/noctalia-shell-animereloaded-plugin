@@ -2,10 +2,6 @@
 
 AnimeReloaded is the next-generation continuation of the original Noctalia Anime plugin.
 
-It keeps the working AllAnime playback path, but moves metadata, discovery, seasons, and airing-aware feed logic onto AniList so the plugin can evolve without tying the whole UI to the stream backend.
-
-Version `3.0.0` is the first AnimeReloaded release baseline. This repository now also includes follow-up UI/runtime polish on top of that hybrid architecture.
-
 ## Highlights
 
 - AniList-backed browse, search, detail pages, titles, synonyms, relations, seasons, and airing metadata
@@ -16,26 +12,11 @@ Version `3.0.0` is the first AnimeReloaded release baseline. This repository now
 - MyAnimeList sync for account progress, without switching in-app metadata away from AniList
 - polished Noctalia-native UI with smoother card scrolling, consistent chips/buttons, and refreshed library/settings flows
 
-## Current Status
-
-- Plugin id: `anime-reloaded`
-- Plugin name: `AnimeReloaded`
-- Runtime folder: `anime-reloaded/`
-- Repository: `noctalia-shell-animereloaded-plugin`
-- Current version: `3.0.0`
-- Metadata provider: `anilist`
-- Stream provider: `allanime`
-- Playback path: Noctalia QML -> `provider_cli.py` -> AniList metadata -> AllAnime mapping/resolution -> `mpv`
-
 ## Screenshots
 
 Desktop integration preview:
 
 ![AnimeReloaded desktop integration](docs/screenshots/top-bar-integration.png)
-
-Bar widget close-up:
-
-![AnimeReloaded bar widget](docs/screenshots/bar-widget.png)
 
 Library panel:
 
@@ -51,21 +32,6 @@ Library panel:
 - Feed tracks releasing seasons you are actively watching and close to current on, then surfaces new episodes when they become relevant.
 - Detail and library progress actions support catching up or marking fully watched when appropriate.
 - MyAnimeList sync supports browser login, refresh, pull, push, optional auto-push, per-title sync badges, and MAL-aligned status/progress payloads.
-
-## Architecture
-
-- `anime-reloaded/providers/anilist.py`
-  AniList-backed metadata provider for browse, search, detail, seasons, relations, airing data, and feed metadata.
-- `anime-reloaded/providers/allanime.py`
-  Current stream provider and episode/stream resolver.
-- `anime-reloaded/providers/anilist_allanime_mapper.py`
-  AniList -> AllAnime mapping used when detail or playback needs a concrete stream source.
-- `anime-reloaded/providers/allanime_anilist_mapper.py`
-  Compatibility mapper used for older AllAnime-origin library/feed data.
-- `anime-reloaded/providers/mapping_cache.py`
-  Local cache and debug surface for cross-provider id resolution.
-- `anime-reloaded/provider_cli.py`
-  Provider-aware Python bridge used by the QML runtime.
 
 ## Feed Direction
 
@@ -94,13 +60,7 @@ Current MAL sync behavior:
 - optional auto-push after local watch changes
 - per-show MAL badges in Library and Detail
 - sync overview focused on titles needing attention, ready-to-push titles, and recently synced titles
-- normal users do not need to create MAL API keys for the default login flow
 
-Current deployed default:
-
-- backend base URL: `https://dns.bogglemind.top:8443`
-- backend callback URL: `https://dns.bogglemind.top:8443/api/v1/mal/auth/callback`
-- Pi deployment shape: backend on loopback `127.0.0.1:18787`, local TLS proxy on public `8443`
 
 Status handling now follows MAL-style rules closely:
 
@@ -108,8 +68,6 @@ Status handling now follows MAL-style rules closely:
 - starting progress promotes them to `watching`
 - known completions are pushed as `completed`
 - `on_hold` and `dropped` are treated as explicit states rather than inferred guesses
-
-Advanced OAuth override controls are intentionally hidden for normal use right now.
 
 ## Repository Layout
 
@@ -167,7 +125,6 @@ AnimeReloaded stores local runtime data in the plugin directory with `anime-relo
 
 ## Related Links
 
-- AllAnime backend implementation: [anime-reloaded/providers/allanime.py](https://github.com/demencia89/noctalia-shell-animereloaded-plugin/blob/main/anime-reloaded/providers/allanime.py)
 - Legacy Anime plugin: [demencia89/noctalia-shell-anime-plugin](https://github.com/demencia89/noctalia-shell-anime-plugin)
 
 ## License
