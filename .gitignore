@@ -11,4 +11,3 @@ anime-reloaded/anime-reloaded-anilist-cache.json
 progress/
 __pycache__/
 *.pyc
-backend/animereloaded-mal-auth.env
