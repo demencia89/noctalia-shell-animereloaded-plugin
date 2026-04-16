@@ -1,0 +1,25 @@
+name: animereloaded-mal-auth
+
+services:
+  animereloaded-mal-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: animereloaded-mal-auth
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18787:18787"
+    env_file:
+      - ./animereloaded-mal-auth.env
+    environment:
+      ANIMERELOADED_MAL_BIND: 0.0.0.0
+      ANIMERELOADED_MAL_PORT: 18787
+      ANIMERELOADED_MAL_DB: /data/sessions.db
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18787/healthz', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
