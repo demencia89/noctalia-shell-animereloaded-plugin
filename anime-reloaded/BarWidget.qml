@@ -15,10 +15,23 @@ Item {
     property int sectionWidgetIndex: -1
     property int sectionWidgetsCount: 0
 
+    function _settingValue(key, fallback) {
+        var value = pluginApi?.pluginSettings?.[key]
+        return value !== undefined && value !== null ? value : fallback
+    }
+
     // Per-screen sizing (required by Noctalia bar widget spec)
     readonly property string screenName:  screen?.name ?? ""
     readonly property real capsuleHeight: Style.getCapsuleHeightForScreen(screenName)
     readonly property real barFontSize:   Style.getBarFontSizeForScreen(screenName)
+    readonly property var widgetDefaults: pluginApi?.manifest?.metadata?.defaultSettings || ({})
+    readonly property string iconName:
+        _settingValue("barWidgetIconName", widgetDefaults.barWidgetIconName || "device-tv")
+    readonly property string widgetText:
+        _settingValue("barWidgetText", widgetDefaults.barWidgetText || "AnimeReloaded")
+    readonly property string iconColorKey:
+        _settingValue("barWidgetIconColor", widgetDefaults.barWidgetIconColor || "mPrimary")
+    readonly property color resolvedIconColor: Color.resolveColorKey(iconColorKey)
 
     readonly property real contentWidth:  row.implicitWidth + Style.marginM * 2
     readonly property real contentHeight: capsuleHeight
@@ -44,14 +57,35 @@ Item {
             spacing: Style.marginXS
 
             NIcon {
-                icon: "device-tv"
-                color: Color.mPrimary
+                icon: root.iconName
+                color: mouseArea.containsMouse ? Color.mOnHover : root.resolvedIconColor
             }
             NText {
-                text: "AnimeReloaded"
-                color: Color.mOnSurface
+                visible: root.widgetText.length > 0
+                text: root.widgetText
+                color: mouseArea.containsMouse ? Color.mOnHover : Color.mOnSurface
                 pointSize: root.barFontSize
             }
+        }
+    }
+
+    NPopupContextMenu {
+        id: contextMenu
+
+        model: [
+            {
+                "label": "Widget Settings",
+                "action": "widget-settings",
+                "icon": "settings"
+            }
+        ]
+
+        onTriggered: action => {
+            contextMenu.close()
+            PanelService.closeContextMenu(root.screen)
+
+            if (action === "widget-settings" && pluginApi?.manifest)
+                BarService.openPluginSettings(root.screen, pluginApi.manifest)
         }
     }
 
@@ -60,10 +94,15 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         cursorShape:  Qt.PointingHandCursor
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         onEntered: TooltipService.show(root, "AnimeReloaded browser", BarService.getTooltipDirection())
         onExited:  TooltipService.hide()
-        onClicked: {
-            if (pluginApi) pluginApi.togglePanel(root.screen, null)
+        onClicked: function(mouse) {
+            if (mouse.button === Qt.LeftButton) {
+                if (pluginApi) pluginApi.togglePanel(root.screen)
+            } else if (mouse.button === Qt.RightButton) {
+                PanelService.showContextMenu(contextMenu, root, root.screen)
+            }
         }
     }
 }

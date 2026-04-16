@@ -10,6 +10,32 @@ Item {
 
     property var pluginApi: null
 
+    function _normaliseTabIndex(value) {
+        var index = Number(value)
+        if (isNaN(index))
+            return 1
+        index = Math.round(index)
+        return Math.max(0, Math.min(2, index))
+    }
+
+    function _restoreLastTab() {
+        if (!pluginApi)
+            return
+        var savedIndex = _normaliseTabIndex(pluginApi?.pluginSettings?.lastPanelTabIndex)
+        if (root.tabIndex !== savedIndex)
+            root.tabIndex = savedIndex
+    }
+
+    function _saveLastTab() {
+        if (!pluginApi)
+            return
+        var savedIndex = _normaliseTabIndex(root.tabIndex)
+        if (pluginApi?.pluginSettings?.lastPanelTabIndex === savedIndex)
+            return
+        pluginApi.pluginSettings.lastPanelTabIndex = savedIndex
+        pluginApi.saveSettings()
+    }
+
     function _themeColor(name, fallback) {
         var value = Color ? Color[name] : null
         return value !== undefined && value !== null ? value : fallback
@@ -37,7 +63,12 @@ Item {
     property int feedStack: 0
     property bool settingsOpen: false
 
+    onPluginApiChanged: root._restoreLastTab()
+
+    Component.onCompleted: root._restoreLastTab()
+
     onTabIndexChanged: {
+        root._saveLastTab()
         if (tabIndex === 2 && anime) {
             anime.fetchFollowingFeed(false)
             anime.markFeedNotificationsSeen()
@@ -68,6 +99,7 @@ Item {
                         BrowseView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 0
                             visible:  root.browseStack === 0
                             opacity:  visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -83,6 +115,7 @@ Item {
                         DetailView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 1
                             visible:  root.browseStack === 1
                             opacity:  visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -99,6 +132,7 @@ Item {
                         LibraryView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 0
                             visible:  root.libraryStack === 0
                             opacity:  visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -114,6 +148,7 @@ Item {
                         DetailView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 1
                             visible:  root.libraryStack === 1
                             opacity:  visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -130,6 +165,7 @@ Item {
                         FeedView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 0
                             visible: root.feedStack === 0
                             opacity: visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -143,6 +179,7 @@ Item {
                         DetailView {
                             anchors.fill: parent
                             pluginApi: root.pluginApi
+                            z: 1
                             visible: root.feedStack === 1
                             opacity: visible ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }

@@ -199,6 +199,84 @@ Item {
         return _themeColor("mOnErrorContainer", _errorColor())
     }
 
+    component SeasonChipLabel: Item {
+        id: seasonChipLabel
+
+        property string text: ""
+        property color textColor: Color.mOnSurface
+        property real pixelSize: 11
+        property bool bold: false
+        property real textOpacity: 1
+        property bool activeScroll: false
+        property real gap: 18
+
+        readonly property bool canScroll:
+            activeScroll && primaryLabel.implicitWidth > width + 1
+        readonly property real travelDistance:
+            canScroll ? primaryLabel.implicitWidth + gap : 0
+
+        implicitHeight: primaryLabel.implicitHeight
+        clip: true
+
+        onCanScrollChanged: {
+            if (!canScroll)
+                labelTrack.x = 0
+        }
+
+        Row {
+            id: labelTrack
+            x: 0
+            spacing: seasonChipLabel.gap
+
+            Text {
+                id: primaryLabel
+                text: seasonChipLabel.text
+                font.pixelSize: seasonChipLabel.pixelSize
+                font.bold: seasonChipLabel.bold
+                color: seasonChipLabel.textColor
+                opacity: seasonChipLabel.textOpacity
+                elide: seasonChipLabel.canScroll ? Text.ElideNone : Text.ElideRight
+                Behavior on color { ColorAnimation { duration: 140 } }
+            }
+
+            Text {
+                visible: seasonChipLabel.canScroll
+                text: seasonChipLabel.text
+                font.pixelSize: seasonChipLabel.pixelSize
+                font.bold: seasonChipLabel.bold
+                color: seasonChipLabel.textColor
+                opacity: seasonChipLabel.textOpacity
+                elide: Text.ElideNone
+                Behavior on color { ColorAnimation { duration: 140 } }
+            }
+        }
+
+        SequentialAnimation {
+            id: marqueeAnimation
+            running: seasonChipLabel.canScroll
+            loops: Animation.Infinite
+
+            PauseAnimation { duration: 500 }
+
+            NumberAnimation {
+                target: labelTrack
+                property: "x"
+                from: 0
+                to: -seasonChipLabel.travelDistance
+                duration: Math.max(2200, seasonChipLabel.travelDistance * 38)
+                easing.type: Easing.InOutQuad
+            }
+
+            PauseAnimation { duration: 350 }
+
+            PropertyAction {
+                target: labelTrack
+                property: "x"
+                value: 0
+            }
+        }
+    }
+
     function _malBadgeFill(badge) {
         var tone = String(badge?.tone || "")
         var base = _withAlpha(_surfaceColor(), 0.94)
@@ -332,7 +410,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             readonly property real metaContentHeight:
-                Math.max(detailMetaFlow.childrenRect.height, detailMetaFlow.implicitHeight)
+                detailMetaFlow.implicitHeight
             height: Math.max(30, metaContentHeight + 10)
             color: "transparent"
             visible: anime?.currentAnime != null
@@ -522,7 +600,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             height: 160
-            color: Color.mSurface
+            color: _withAlpha(_surfaceColor(), 0.36)
             clip: true
             visible: anime?.currentAnime != null
 
@@ -599,7 +677,7 @@ Item {
             Layout.fillWidth: true
             visible: detailView._seasonEntries().length > 1
             height: visible ? 92 : 0
-            color: _withAlpha(_surfaceColor(), 0.72)
+            color: _withAlpha(_surfaceColor(), 0.54)
 
             Column {
                 anchors.fill: parent
@@ -654,29 +732,29 @@ Item {
                             anchors.margins: 9
                             spacing: 2
 
-                            Text {
+                            SeasonChipLabel {
+                                width: parent.width
                                 text: modelData.englishName || modelData.name || ""
-                                font.pixelSize: 11
-                                font.bold: isCurrent
-                                color: isCurrent
+                                pixelSize: 11
+                                bold: isCurrent
+                                activeScroll: hovered
+                                textColor: isCurrent
                                     ? detailView._onPrimaryColor()
                                     : (hovered ? detailView._primaryColor() : Color.mOnSurface)
-                                elide: Text.ElideRight
-                                Behavior on color { ColorAnimation { duration: 140 } }
                             }
 
-                            Text {
+                            SeasonChipLabel {
+                                width: parent.width
                                 readonly property string seasonMetaText: detailView._seasonMetaText(modelData)
                                 text: isCurrent
                                     ? (seasonMetaText.length > 0 ? "Current · " + seasonMetaText : "Current")
                                     : seasonMetaText
-                                font.pixelSize: 9
-                                color: isCurrent
+                                pixelSize: 9
+                                activeScroll: hovered
+                                textColor: isCurrent
                                     ? detailView._onPrimaryColor()
                                     : (hovered ? detailView._primaryColor() : detailView._onSurfaceVariantColor())
-                                opacity: 0.8
-                                elide: Text.ElideRight
-                                Behavior on color { ColorAnimation { duration: 140 } }
+                                textOpacity: 0.8
                             }
                         }
 

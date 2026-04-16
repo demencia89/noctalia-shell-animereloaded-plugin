@@ -16,7 +16,8 @@
   "entryPoints": {
     "main": "Main.qml",
     "barWidget": "BarWidget.qml",
-    "panel": "Panel.qml"
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
   },
   "dependencies": {
     "plugins": []
@@ -26,7 +27,11 @@
       "mode": "sub",
       "preferredProvider": "auto",
       "metadataProvider": "anilist",
-      "streamProvider": "allanime"
+      "streamProvider": "allanime",
+      "lastPanelTabIndex": 1,
+      "barWidgetIconName": "device-tv",
+      "barWidgetText": "AnimeReloaded",
+      "barWidgetIconColor": "mPrimary"
     },
     "providers": {
       "metadata": {

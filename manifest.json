@@ -16,7 +16,8 @@
   "entryPoints": {
     "main": "anime-reloaded/Main.qml",
     "barWidget": "anime-reloaded/BarWidget.qml",
-    "panel": "anime-reloaded/Panel.qml"
+    "panel": "anime-reloaded/Panel.qml",
+    "settings": "anime-reloaded/Settings.qml"
   },
   "dependencies": {
     "plugins": []
@@ -27,7 +28,11 @@
       "mode": "sub",
       "preferredProvider": "auto",
       "metadataProvider": "anilist",
-      "streamProvider": "allanime"
+      "streamProvider": "allanime",
+      "lastPanelTabIndex": 1,
+      "barWidgetIconName": "device-tv",
+      "barWidgetText": "AnimeReloaded",
+      "barWidgetIconColor": "mPrimary"
     },
     "providers": {
       "metadata": {

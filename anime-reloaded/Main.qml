@@ -102,6 +102,30 @@ Item {
         }
     }
 
+    function _isVisibleGenre(genre) {
+        var name = String(genre || "").trim()
+        if (name.length === 0)
+            return false
+        return name.toLowerCase() !== "ecchi" && name.toLowerCase() !== "hentai"
+    }
+
+    function _filterVisibleGenres(genres) {
+        var filtered = []
+        var seen = ({})
+        var items = Array.isArray(genres) ? genres : []
+        for (var i = 0; i < items.length; i++) {
+            var name = String(items[i] || "").trim()
+            if (!_isVisibleGenre(name))
+                continue
+            var key = name.toLowerCase()
+            if (seen[key])
+                continue
+            seen[key] = true
+            filtered.push(name)
+        }
+        return filtered
+    }
+
     IpcHandler {
         target: "plugin:AnimeReloaded"
 
@@ -1855,7 +1879,9 @@ Item {
             if (running) return
             if (_buf.length === 0) return
             try {
-                root.genresList = JSON.parse(_buf)
+                root.genresList = root._filterVisibleGenres(JSON.parse(_buf))
+                if (!root._isVisibleGenre(root.currentGenre))
+                    root.currentGenre = ""
             } catch(e) { Logger.w("AnimeReloaded", "genres parse error:", e) }
             _buf = ""
         }

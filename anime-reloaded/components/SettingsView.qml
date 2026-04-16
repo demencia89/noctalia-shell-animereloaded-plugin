@@ -23,6 +23,8 @@ Item {
         settingsView._resolvedMalInspectorFilter()
     readonly property var filteredMalInspectorEntries:
         settingsView._filterMalInspectorEntries(malInspectorEntries, effectiveMalInspectorFilter)
+    readonly property bool wideLayout: width >= 920
+    readonly property int localLibraryCount: (anime?.libraryList || []).length
 
     signal backRequested()
 
@@ -38,6 +40,60 @@ Item {
     function _outlineVariantColor() {
         return _themeColor("mOutlineVariant",
             _themeColor("mOutline", Color.mOnSurfaceVariant))
+    }
+
+    function _surfaceColor() {
+        return _themeColor("mSurface", Qt.rgba(0.11, 0.12, 0.14, 1))
+    }
+
+    function _surfaceVariantColor() {
+        return _themeColor("mSurfaceVariant",
+            Qt.tint(_surfaceColor(), Qt.rgba(1, 1, 1, 0.06)))
+    }
+
+    function _cardFill(tintColor, tintStrength, baseAlpha) {
+        var base = Qt.rgba(_surfaceColor().r, _surfaceColor().g, _surfaceColor().b,
+            baseAlpha === undefined ? 0.9 : baseAlpha)
+        if (!tintColor)
+            return base
+        return Qt.tint(base, _withAlpha(tintColor, tintStrength === undefined ? 0.08 : tintStrength))
+    }
+
+    function _cardBorder(tintColor, tintStrength) {
+        var outline = _withAlpha(_outlineVariantColor(), 0.42)
+        if (!tintColor)
+            return outline
+        return Qt.tint(outline, _withAlpha(tintColor, tintStrength === undefined ? 0.12 : tintStrength))
+    }
+
+    function _cardHighlight(tintColor, alpha) {
+        if (!tintColor)
+            return Qt.rgba(1, 1, 1, 0.03)
+        return _withAlpha(tintColor, alpha === undefined ? 0.08 : alpha)
+    }
+
+    function _panelSizeDescription() {
+        if (anime?.panelSize === "small")
+            return "Compact width for quick checks and tighter desktops."
+        if (anime?.panelSize === "large")
+            return "Wide drawer with more breathing room for detail-heavy browsing."
+        return "Balanced default for everyday browsing and library management."
+    }
+
+    function _posterSizeDescription() {
+        if (anime?.posterSize === "small")
+            return "Denser grids that fit more titles on screen at once."
+        if (anime?.posterSize === "large")
+            return "Roomier covers with stronger visual focus and easier scanning."
+        return "Balanced cover density that matches the rest of the panel."
+    }
+
+    function _malConnectionSummary() {
+        if (anime?.malSync?.enabled)
+            return anime?.malSync?.userName
+                ? ("Connected as " + anime.malSync.userName)
+                : "Connected and ready to sync"
+        return "Browser-based login, AniList-first metadata, optional push/pull sync."
     }
 
     function _malToneFill(tone, dense) {
@@ -238,6 +294,106 @@ Item {
         return String(item?.detail || "")
     }
 
+    component SettingsCard: Rectangle {
+        id: settingsCard
+
+        property color tintColor: Color.mPrimary
+        property real tintStrength: 0.08
+        property real baseAlpha: 0.9
+        property real contentPadding: 16
+        property real contentSpacing: 12
+        default property alias contentData: contentColumn.data
+
+        radius: 22
+        color: settingsView._cardFill(tintColor, tintStrength, baseAlpha)
+        border.width: 1
+        border.color: settingsView._cardBorder(tintColor, tintStrength + 0.06)
+        implicitHeight: contentColumn.implicitHeight + contentPadding * 2
+
+        Rectangle {
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                leftMargin: 1
+                rightMargin: 1
+                topMargin: 1
+            }
+            height: 1
+            radius: 1
+            color: settingsView._cardHighlight(settingsCard.tintColor, 0.1)
+            opacity: 0.75
+        }
+
+        Column {
+            id: contentColumn
+            anchors.fill: parent
+            anchors.margins: settingsCard.contentPadding
+            spacing: settingsCard.contentSpacing
+        }
+    }
+
+    component SummaryPill: Rectangle {
+        id: summaryPill
+
+        property string label: ""
+        property color toneColor: Color.mPrimary
+        property color textColor: Color.mOnSurface
+        property real maxWidth: 32000
+
+        implicitWidth: Math.min(maxWidth, labelText.implicitWidth + 20)
+        implicitHeight: 30
+        radius: 15
+        clip: true
+        color: Qt.tint(
+            Qt.rgba(settingsView._surfaceColor().r, settingsView._surfaceColor().g, settingsView._surfaceColor().b, 0.9),
+            settingsView._withAlpha(toneColor, 0.14)
+        )
+        border.width: 1
+        border.color: settingsView._withAlpha(toneColor, 0.24)
+
+        Text {
+            id: labelText
+            anchors {
+                left: parent.left
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+                leftMargin: 10
+                rightMargin: 10
+            }
+            text: summaryPill.label
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            font.pixelSize: 11
+            font.bold: true
+            color: summaryPill.textColor
+        }
+    }
+
+    component SettingsInsetPanel: Rectangle {
+        id: insetPanel
+
+        property color tintColor: Color.mPrimary
+        property real tintStrength: 0.05
+        property real baseAlpha: 0.86
+        property real contentPadding: 12
+        property real contentSpacing: 8
+        default property alias contentData: insetContent.data
+
+        radius: 18
+        color: settingsView._cardFill(tintColor, tintStrength, baseAlpha)
+        border.width: 1
+        border.color: settingsView._cardBorder(tintColor, tintStrength + 0.05)
+        implicitHeight: insetContent.implicitHeight + contentPadding * 2
+
+        Column {
+            id: insetContent
+            anchors.fill: parent
+            anchors.margins: insetPanel.contentPadding
+            spacing: insetPanel.contentSpacing
+        }
+    }
+
     component SettingChoiceButton: ChoiceChip {
         property bool active: false
 
@@ -365,35 +521,38 @@ Item {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    implicitHeight: 40
-                    radius: 20
-                    color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+                    implicitHeight: 46
+                    radius: 23
+                    color: settingsView._cardFill(Color.mPrimary, 0.08, 0.9)
                     border.width: 1
-                    border.color: _withAlpha(_outlineVariantColor(), 0.45)
+                    border.color: settingsView._cardBorder(Color.mPrimary, 0.14)
 
-                    Row {
+                    RowLayout {
                         anchors {
                             left: parent.left
+                            right: parent.right
                             verticalCenter: parent.verticalCenter
                             leftMargin: 14
+                            rightMargin: 12
                         }
                         spacing: 8
 
                         Rectangle {
-                            width: 24
-                            height: 24
-                            radius: 12
-                            color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.14)
+                            width: 28
+                            height: 28
+                            radius: 14
+                            color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.16)
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "⚙"
-                                font.pixelSize: 12
+                                font.pixelSize: 13
                                 color: Color.mPrimary
                             }
                         }
 
                         Column {
+                            Layout.fillWidth: true
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: 1
 
@@ -405,11 +564,17 @@ Item {
                             }
 
                             Text {
-                                text: "Layout and browsing preferences"
+                                text: "Layout, density, and sync preferences"
                                 font.pixelSize: 10
                                 color: Color.mOnSurfaceVariant
                                 opacity: 0.72
                             }
+                        }
+
+                        SummaryPill {
+                            label: settingsView.localLibraryCount + " saved"
+                            toneColor: Color.mPrimary
+                            textColor: Color.mPrimary
                         }
                     }
                 }
@@ -431,62 +596,111 @@ Item {
 
                 Column {
                     width: settingsScroll.availableWidth
-                    spacing: 14
+                    spacing: 16
 
-                    Rectangle {
+                    SettingsCard {
                         width: parent.width
-                        radius: 18
-                        color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.7)
-                        border.width: 1
-                        border.color: _withAlpha(_outlineVariantColor(), 0.38)
-                        implicitHeight: heroColumn.implicitHeight + 28
+                        tintColor: Color.mPrimary
+                        tintStrength: 0.12
+                        baseAlpha: 0.94
+                        contentPadding: 18
+                        contentSpacing: 14
 
-                        Column {
-                            id: heroColumn
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 8
+                        RowLayout {
+                            width: parent.width
+                            spacing: 16
 
-                            Text {
-                                text: "Tune the panel"
-                                font.pixelSize: 17
-                                font.bold: true
-                                color: Color.mOnSurface
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Text {
+                                    text: "Tune AnimeReloaded"
+                                    font.pixelSize: 18
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "Refine panel density, keep browsing comfortable, and manage MyAnimeList sync without leaving the plugin."
+                                    wrapMode: Text.Wrap
+                                    lineHeight: 1.35
+                                    font.pixelSize: 11
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.82
+                                }
                             }
 
-                            Text {
-                                width: parent.width
-                                text: "Adjust the drawer width, poster density, and sync preferences while the provider split settles."
-                                wrapMode: Text.Wrap
-                                lineHeight: 1.35
-                                font.pixelSize: 11
-                                color: Color.mOnSurfaceVariant
-                                opacity: 0.82
+                            Rectangle {
+                                visible: settingsView.wideLayout
+                                Layout.preferredWidth: 86
+                                Layout.preferredHeight: 72
+                                radius: 18
+                                color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+                                border.width: 1
+                                border.color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.22)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "AR"
+                                    font.pixelSize: 24
+                                    font.bold: true
+                                    color: Color.mPrimary
+                                    opacity: 0.9
+                                }
+                            }
+                        }
+
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+
+                            SummaryPill {
+                                label: "Panel " + String(anime?.panelSize || "medium")
+                                toneColor: Color.mPrimary
+                                textColor: Color.mPrimary
+                            }
+
+                            SummaryPill {
+                                label: "Posters " + String(anime?.posterSize || "medium")
+                                toneColor: Color.mPrimary
+                                textColor: Color.mPrimary
+                            }
+
+                            SummaryPill {
+                                label: anime?.malSync?.enabled ? "MAL connected" : "MAL optional"
+                                toneColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mOnSurfaceVariant
+                                textColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mOnSurfaceVariant
+                            }
+
+                            SummaryPill {
+                                label: settingsView.localLibraryCount + " in library"
+                                toneColor: Color.mPrimary
+                                textColor: Color.mOnSurface
                             }
                         }
                     }
 
-                    Rectangle {
+                    GridLayout {
                         width: parent.width
-                        radius: 20
-                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
-                        border.width: 1
-                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
-                        implicitHeight: panelSection.implicitHeight + 32
+                        columns: settingsView.wideLayout ? 2 : 1
+                        columnSpacing: 16
+                        rowSpacing: 16
 
-                        Column {
-                            id: panelSection
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 12
+                        SettingsCard {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignTop
+                            tintColor: Color.mPrimary
+                            tintStrength: anime?.panelSize === "large" ? 0.1 : 0.07
 
                             Row {
                                 spacing: 10
 
                                 Rectangle {
-                                    width: 28
-                                    height: 28
-                                    radius: 14
+                                    width: 30
+                                    height: 30
+                                    radius: 15
                                     color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
 
                                     Text {
@@ -508,7 +722,7 @@ Item {
                                     }
 
                                     Text {
-                                        text: "Controls how wide the plugin drawer appears"
+                                        text: "Control how wide the drawer feels when browsing."
                                         font.pixelSize: 11
                                         color: Color.mOnSurfaceVariant
                                         opacity: 0.72
@@ -534,30 +748,31 @@ Item {
                                     }
                                 }
                             }
+
+                            Text {
+                                width: parent.width
+                                text: settingsView._panelSizeDescription()
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.35
+                                font.pixelSize: 10
+                                color: Color.mOnSurfaceVariant
+                                opacity: 0.72
+                            }
                         }
-                    }
 
-                    Rectangle {
-                        width: parent.width
-                        radius: 20
-                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
-                        border.width: 1
-                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
-                        implicitHeight: posterSection.implicitHeight + 32
-
-                        Column {
-                            id: posterSection
-                            anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 12
+                        SettingsCard {
+                            Layout.fillWidth: true
+                            Layout.alignment: Qt.AlignTop
+                            tintColor: Color.mPrimary
+                            tintStrength: anime?.posterSize === "large" ? 0.1 : 0.07
 
                             Row {
                                 spacing: 10
 
                                 Rectangle {
-                                    width: 28
-                                    height: 28
-                                    radius: 14
+                                    width: 30
+                                    height: 30
+                                    radius: 15
                                     color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
 
                                     Text {
@@ -579,7 +794,7 @@ Item {
                                     }
 
                                     Text {
-                                        text: "Adjust the size of anime covers in the grid"
+                                        text: "Adjust cover density without changing the rest of the layout."
                                         font.pixelSize: 11
                                         color: Color.mOnSurfaceVariant
                                         opacity: 0.72
@@ -606,25 +821,31 @@ Item {
                                     }
                                 }
                             }
+
+                            Text {
+                                width: parent.width
+                                text: settingsView._posterSizeDescription()
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.35
+                                font.pixelSize: 10
+                                color: Color.mOnSurfaceVariant
+                                opacity: 0.72
+                            }
                         }
                     }
 
-                    Rectangle {
+                    SettingsCard {
                         visible: false  // Hidden for now; keep mirror preference wiring intact.
                         width: parent.width
-                        radius: 20
-                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
-                        border.width: 1
-                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
-                        implicitHeight: providerSection.implicitHeight + 32
+                        tintColor: Color.mPrimary
 
                         Column {
                             id: providerSection
-                            anchors.fill: parent
-                            anchors.margins: 16
+                            width: parent.width
                             spacing: 12
 
-                            Row {
+                            RowLayout {
+                                width: parent.width
                                 spacing: 10
 
                                 Rectangle {
@@ -642,6 +863,7 @@ Item {
                                 }
 
                                 Column {
+                                    Layout.fillWidth: true
                                     spacing: 2
 
                                     Text {
@@ -683,21 +905,18 @@ Item {
                         }
                     }
 
-                    Rectangle {
+                    SettingsCard {
                         width: parent.width
-                        radius: 20
-                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.86)
-                        border.width: 1
-                        border.color: _withAlpha(_outlineVariantColor(), 0.4)
-                        implicitHeight: malSection.implicitHeight + 32
+                        tintColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary
+                        tintStrength: anime?.malSync?.enabled ? 0.09 : 0.07
 
                         Column {
                             id: malSection
-                            anchors.fill: parent
-                            anchors.margins: 16
+                            width: parent.width
                             spacing: 14
 
-                            Row {
+                            RowLayout {
+                                width: parent.width
                                 spacing: 10
 
                                 Rectangle {
@@ -715,7 +934,8 @@ Item {
                                     }
                                 }
 
-                                Column {
+                                ColumnLayout {
+                                    Layout.fillWidth: true
                                     spacing: 2
 
                                     Text {
@@ -726,7 +946,7 @@ Item {
                                     }
 
                                     Text {
-                                        width: settingsScroll.availableWidth - 80
+                                        Layout.fillWidth: true
                                         text: "Keep AniList as the in-app metadata source and use MyAnimeList only for account sync. Regular login happens in the browser and AnimeReloaded finishes the connection automatically."
                                         wrapMode: Text.Wrap
                                         lineHeight: 1.35
@@ -737,98 +957,479 @@ Item {
                                 }
                             }
 
+                            Flow {
+                                width: parent.width
+                                spacing: 8
+
+                                SummaryPill {
+                                    label: settingsView._malConnectionSummary()
+                                    maxWidth: settingsView.wideLayout ? 320 : Math.max(180, parent.width - 12)
+                                    toneColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary
+                                    textColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mOnSurface
+                                }
+
+                                SummaryPill {
+                                    label: anime?.malSync?.autoPush ? "Auto Push enabled" : "Manual push"
+                                    toneColor: anime?.malSync?.autoPush ? Color.mPrimary : Color.mOnSurfaceVariant
+                                    textColor: anime?.malSync?.autoPush ? Color.mPrimary : Color.mOnSurfaceVariant
+                                }
+                            }
+
                             Rectangle {
                                 width: parent.width
                                 radius: 18
-                                color: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.56)
+                                color: settingsView._cardFill(
+                                    anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary,
+                                    anime?.malSync?.enabled ? 0.08 : 0.06,
+                                    0.92
+                                )
                                 border.width: 1
-                                border.color: _withAlpha(_outlineVariantColor(), 0.32)
+                                border.color: settingsView._cardBorder(
+                                    anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary,
+                                    0.16
+                                )
                                 implicitHeight: malStatusColumn.implicitHeight + 22
 
                                 Column {
                                     id: malStatusColumn
                                     anchors.fill: parent
                                     anchors.margins: 12
-                                    spacing: 8
+                                    spacing: 12
 
-                                    Row {
-                                        spacing: 8
+                                    SettingsInsetPanel {
+                                        width: parent.width
+                                        tintColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary
+                                        tintStrength: anime?.malSync?.enabled ? 0.08 : 0.05
+                                        baseAlpha: 0.92
+                                        contentSpacing: 10
 
-                                        Rectangle {
-                                            width: statusLabel.implicitWidth + 18
-                                            height: 26
-                                            radius: 13
-                                            color: anime?.malSync?.enabled
-                                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.16)
-                                                : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.8)
-                                            border.width: 1
-                                            border.color: anime?.malSync?.enabled
-                                                ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.42)
-                                                : _withAlpha(_outlineVariantColor(), 0.4)
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: 12
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Connection"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                Flow {
+                                                    Layout.fillWidth: true
+                                                    spacing: 8
+
+                                                    Rectangle {
+                                                        width: statusLabel.implicitWidth + 18
+                                                        height: 26
+                                                        radius: 13
+                                                        color: anime?.malSync?.enabled
+                                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.16)
+                                                            : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.8)
+                                                        border.width: 1
+                                                        border.color: anime?.malSync?.enabled
+                                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.42)
+                                                            : _withAlpha(_outlineVariantColor(), 0.4)
+
+                                                        Text {
+                                                            id: statusLabel
+                                                            anchors.centerIn: parent
+                                                            text: anime?.malSync?.enabled
+                                                                ? ("Connected" + (anime?.malSync?.userName ? " · " + anime.malSync.userName : ""))
+                                                                : "Not Connected"
+                                                            font.pixelSize: 11
+                                                            font.bold: true
+                                                            color: anime?.malSync?.enabled ? Color.mPrimary : Color.mOnSurface
+                                                        }
+                                                    }
+
+                                                    Rectangle {
+                                                        width: autoPushLabel.implicitWidth + 18
+                                                        height: 26
+                                                        radius: 13
+                                                        color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
+                                                        border.width: 1
+                                                        border.color: _withAlpha(_outlineVariantColor(), 0.38)
+
+                                                        Text {
+                                                            id: autoPushLabel
+                                                            anchors.centerIn: parent
+                                                            text: anime?.malSync?.autoPush ? "Auto Push On" : "Auto Push Off"
+                                                            font.pixelSize: 11
+                                                            color: Color.mOnSurfaceVariant
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: anime?.malSync?.lastSyncAt
+                                                        ? ("Last " + (anime?.malSync?.lastSyncDirection || "sync") + " · " + new Date(Number(anime.malSync.lastSyncAt) * 1000).toLocaleString())
+                                                        : "No successful MyAnimeList sync yet."
+                                                    wrapMode: Text.Wrap
+                                                    font.pixelSize: 11
+                                                    color: Color.mOnSurfaceVariant
+                                                    opacity: 0.74
+                                                }
+                                            }
+
+                                            Flow {
+                                                Layout.alignment: Qt.AlignRight | Qt.AlignTop
+                                                spacing: 8
+
+                                                ActionChip {
+                                                    text: anime?.malSync?.enabled ? "Reconnect MAL" : "Connect MAL"
+                                                    leadingText: "M"
+                                                    enabled: !(anime?.isMalSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.startMalBrowserAuth()
+                                                }
+
+                                                ActionChip {
+                                                    text: "Disconnect"
+                                                    leadingText: "✕"
+                                                    visible: anime?.malSync?.enabled ?? false
+                                                    enabled: (anime?.malSync?.enabled ?? false)
+                                                        && !(anime?.isMalSyncBusy ?? false)
+                                                    baseColor: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.86)
+                                                    hoverColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+                                                    hoverBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.4)
+                                                    hoverTextColor: Color.mError
+                                                    onClicked: if (anime) anime.clearMalSyncSession()
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            visible: (anime?.malSyncMessage || "").length > 0
+                                            width: parent.width
+                                            text: anime?.malSyncMessage || ""
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: Color.mPrimary
+                                        }
+
+                                        Text {
+                                            visible: (anime?.malSyncError || "").length > 0
+                                            width: parent.width
+                                            text: anime?.malSyncError || ""
+                                            wrapMode: Text.Wrap
+                                            font.pixelSize: 11
+                                            color: Color.mError
+                                        }
+                                    }
+
+                                    GridLayout {
+                                        width: parent.width
+                                        columns: settingsView.wideLayout ? 2 : 1
+                                        columnSpacing: 12
+                                        rowSpacing: 12
+
+                                        SettingsInsetPanel {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignTop
+                                            tintColor: Color.mPrimary
+                                            tintStrength: 0.05
+                                            baseAlpha: 0.9
+                                            contentSpacing: 8
 
                                             Text {
-                                                id: statusLabel
-                                                anchors.centerIn: parent
-                                                text: anime?.malSync?.enabled
-                                                    ? ("Connected" + (anime?.malSync?.userName ? " · " + anime.malSync.userName : ""))
-                                                    : "Not Connected"
+                                                text: "Sync Mode"
                                                 font.pixelSize: 11
                                                 font.bold: true
-                                                color: anime?.malSync?.enabled ? Color.mPrimary : Color.mOnSurface
+                                                color: Color.mOnSurface
                                             }
-                                        }
-
-                                        Rectangle {
-                                            width: autoPushLabel.implicitWidth + 18
-                                            height: 26
-                                            radius: 13
-                                            color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.82)
-                                            border.width: 1
-                                            border.color: _withAlpha(_outlineVariantColor(), 0.38)
 
                                             Text {
-                                                id: autoPushLabel
-                                                anchors.centerIn: parent
-                                                text: anime?.malSync?.autoPush ? "Auto Push On" : "Auto Push Off"
-                                                font.pixelSize: 11
+                                                width: parent.width
+                                                text: "Choose whether local progress should wait for a manual push or sync out automatically."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
                                                 color: Color.mOnSurfaceVariant
+                                                opacity: 0.72
+                                            }
+
+                                            Flow {
+                                                width: parent.width
+                                                spacing: 10
+
+                                                Repeater {
+                                                    model: [
+                                                        { label: "Manual", value: false },
+                                                        { label: "Auto Push", value: true }
+                                                    ]
+
+                                                    delegate: SettingChoiceButton {
+                                                        text: modelData.label
+                                                        active: (anime?.malSync?.autoPush === true) === modelData.value
+                                                        onClicked: if (anime) anime.setMalSyncField("autoPush", modelData.value)
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: anime?.malSync?.autoPush
+                                                    ? "Auto Push sends local watch changes to MyAnimeList after a short delay. Pulls and imports never push back automatically."
+                                                    : "Manual only updates MyAnimeList when you press Push To MAL."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.7
+                                            }
+                                        }
+
+                                        SettingsInsetPanel {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignTop
+                                            tintColor: anime?.malSync?.enabled ? Color.mTertiary : Color.mPrimary
+                                            tintStrength: anime?.malSync?.enabled ? 0.06 : 0.05
+                                            baseAlpha: 0.9
+                                            contentSpacing: 8
+
+                                            Text {
+                                                text: "Sync Actions"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                                color: Color.mOnSurface
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: "Pull imports remote progress. Push sends your local progress back to MyAnimeList."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.72
+                                            }
+
+                                            Flow {
+                                                width: parent.width
+                                                spacing: 10
+
+                                                ActionChip {
+                                                    text: "Pull From MAL"
+                                                    leadingText: "↓"
+                                                    enabled: !(anime?.isMalSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.pullMalSync(true)
+                                                }
+
+                                                ActionChip {
+                                                    text: "Push To MAL"
+                                                    leadingText: "↑"
+                                                    enabled: !(anime?.isMalSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.pushMalSync(true)
+                                                }
+
+                                                ActionChip {
+                                                    visible: settingsView.showMalAdvancedControls
+                                                    text: anime?.malSyncShowAdvanced ? "Hide Advanced" : "Advanced"
+                                                    leadingText: anime?.malSyncShowAdvanced ? "-" : "+"
+                                                    enabled: !(anime?.isMalSyncBusy ?? false)
+                                                    onClicked: if (anime) anime.malSyncShowAdvanced = !anime.malSyncShowAdvanced
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: "Flow: click Connect MAL, approve access in the browser, then AnimeReloaded finishes the session automatically."
+                                                wrapMode: Text.Wrap
+                                                lineHeight: 1.35
+                                                font.pixelSize: 10
+                                                color: Color.mOnSurfaceVariant
+                                                opacity: 0.68
+                                            }
+                                        }
+                                    }
+
+                                    SettingsInsetPanel {
+                                        visible: settingsView.showMalAdvancedControls
+                                            && (anime?.malSyncShowAdvanced ?? false)
+                                        width: parent.width
+                                        tintColor: Color.mPrimary
+                                        tintStrength: 0.05
+                                        baseAlpha: 0.9
+                                        contentSpacing: 10
+
+                                        Text {
+                                            text: "Advanced OAuth"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            color: Color.mOnSurface
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: "Use these only when debugging a custom MyAnimeList app or a non-default auth bridge."
+                                            wrapMode: Text.Wrap
+                                            lineHeight: 1.35
+                                            font.pixelSize: 10
+                                            color: Color.mOnSurfaceVariant
+                                            opacity: 0.72
+                                        }
+
+                                        GridLayout {
+                                            width: parent.width
+                                            columns: settingsView.wideLayout ? 2 : 1
+                                            columnSpacing: 12
+                                            rowSpacing: 10
+
+                                            Column {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Backend URL"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                SettingTextField {
+                                                    width: parent.width
+                                                    value: anime?.malSync?.backendUrl || ""
+                                                    placeholderText: "Optional shared MAL auth bridge URL"
+                                                    onTextEdited: function(text) {
+                                                        if (anime) anime.setMalSyncField("backendUrl", text)
+                                                    }
+                                                }
+                                            }
+
+                                            Column {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Client ID"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                SettingTextField {
+                                                    width: parent.width
+                                                    value: anime?.malSync?.clientId || ""
+                                                    placeholderText: "MyAnimeList client id"
+                                                    onTextEdited: function(text) {
+                                                        if (anime) anime.setMalSyncField("clientId", text)
+                                                    }
+                                                }
+                                            }
+
+                                            Column {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Client Secret"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                SettingTextField {
+                                                    width: parent.width
+                                                    value: anime?.malSync?.clientSecret || ""
+                                                    placeholderText: "Optional client secret"
+                                                    secret: true
+                                                    onTextEdited: function(text) {
+                                                        if (anime) anime.setMalSyncField("clientSecret", text)
+                                                    }
+                                                }
+                                            }
+
+                                            Column {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Redirect URI"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                SettingTextField {
+                                                    width: parent.width
+                                                    value: anime?.malSync?.redirectUri || ""
+                                                    placeholderText: "Registered redirect URI, if your MAL app requires one"
+                                                    onTextEdited: function(text) {
+                                                        if (anime) anime.setMalSyncField("redirectUri", text)
+                                                    }
+                                                }
+                                            }
+
+                                            Column {
+                                                Layout.columnSpan: settingsView.wideLayout ? 2 : 1
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    text: "Manual Authorization Code"
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    color: Color.mOnSurface
+                                                }
+
+                                                SettingTextField {
+                                                    width: parent.width
+                                                    value: anime?.malSyncAuthCode || ""
+                                                    placeholderText: "Paste the `code` query parameter from the browser redirect"
+                                                    onTextEdited: function(text) {
+                                                        if (anime) anime.malSyncAuthCode = text
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Flow {
+                                            width: parent.width
+                                            spacing: 10
+
+                                            ActionChip {
+                                                text: "Open Auth"
+                                                leadingText: "↗"
+                                                enabled: !(anime?.isMalSyncBusy ?? false)
+                                                onClicked: if (anime) anime.startMalAuth()
+                                            }
+
+                                            ActionChip {
+                                                text: "Finish Manual Connect"
+                                                leadingText: "✓"
+                                                enabled: !(anime?.isMalSyncBusy ?? false)
+                                                onClicked: if (anime) anime.exchangeMalAuthCode()
                                             }
                                         }
                                     }
 
                                     Text {
+                                        visible: settingsView.showMalAdvancedControls
+                                            && !(anime?.malSyncShowAdvanced ?? false)
                                         width: parent.width
-                                        text: anime?.malSync?.lastSyncAt
-                                            ? ("Last " + (anime?.malSync?.lastSyncDirection || "sync") + " · " + new Date(Number(anime.malSync.lastSyncAt) * 1000).toLocaleString())
-                                            : "No successful MyAnimeList sync yet."
+                                        text: "Advanced OAuth overrides stay hidden unless you need to debug a custom MAL app."
                                         wrapMode: Text.Wrap
-                                        font.pixelSize: 11
+                                        lineHeight: 1.35
+                                        font.pixelSize: 10
                                         color: Color.mOnSurfaceVariant
-                                        opacity: 0.74
+                                        opacity: 0.62
                                     }
 
-                                    Text {
-                                        visible: (anime?.malSyncMessage || "").length > 0
+                                    SettingsInsetPanel {
                                         width: parent.width
-                                        text: anime?.malSyncMessage || ""
-                                        wrapMode: Text.Wrap
-                                        font.pixelSize: 11
-                                        color: Color.mPrimary
-                                    }
-
-                                    Text {
-                                        visible: (anime?.malSyncError || "").length > 0
-                                        width: parent.width
-                                        text: anime?.malSyncError || ""
-                                        wrapMode: Text.Wrap
-                                        font.pixelSize: 11
-                                        color: Color.mError
-                                    }
-
-                                    Column {
-                                        width: parent.width
-                                        spacing: 10
                                         visible: (settingsView.malInspectorEntries || []).length > 0
+                                        tintColor: settingsView.effectiveMalInspectorFilter === "attention"
+                                            ? Color.mError
+                                            : (settingsView.effectiveMalInspectorFilter === "ready"
+                                                ? Color.mTertiary
+                                                : Color.mPrimary)
+                                        tintStrength: settingsView.effectiveMalInspectorFilter === "attention" ? 0.06 : 0.05
+                                        baseAlpha: 0.9
+                                        contentSpacing: 10
 
                                         Text {
                                             text: "Library Sync Status"
@@ -1024,253 +1625,6 @@ Item {
                                 }
                             }
 
-                            Column {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                spacing: 8
-
-                                Text {
-                                    text: "Backend URL"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                SettingTextField {
-                                    width: parent.width
-                                    value: anime?.malSync?.backendUrl || ""
-                                    placeholderText: "Optional shared MAL auth bridge URL"
-                                    onTextEdited: function(text) {
-                                        if (anime) anime.setMalSyncField("backendUrl", text)
-                                    }
-                                }
-                            }
-
-                            Column {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                spacing: 8
-
-                                Text {
-                                    text: "Client ID"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                SettingTextField {
-                                    width: parent.width
-                                    value: anime?.malSync?.clientId || ""
-                                    placeholderText: "MyAnimeList client id"
-                                    onTextEdited: function(text) {
-                                        if (anime) anime.setMalSyncField("clientId", text)
-                                    }
-                                }
-                            }
-
-                            Column {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                spacing: 8
-
-                                Text {
-                                    text: "Client Secret"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                SettingTextField {
-                                    width: parent.width
-                                    value: anime?.malSync?.clientSecret || ""
-                                    placeholderText: "Optional client secret"
-                                    secret: true
-                                    onTextEdited: function(text) {
-                                        if (anime) anime.setMalSyncField("clientSecret", text)
-                                    }
-                                }
-                            }
-
-                            Column {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                spacing: 8
-
-                                Text {
-                                    text: "Redirect URI"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                SettingTextField {
-                                    width: parent.width
-                                    value: anime?.malSync?.redirectUri || ""
-                                    placeholderText: "Registered redirect URI, if your MAL app requires one"
-                                    onTextEdited: function(text) {
-                                        if (anime) anime.setMalSyncField("redirectUri", text)
-                                    }
-                                }
-                            }
-
-                            Column {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                spacing: 8
-
-                                Text {
-                                    text: "Manual Authorization Code"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                SettingTextField {
-                                    width: parent.width
-                                    value: anime?.malSyncAuthCode || ""
-                                    placeholderText: "Paste the `code` query parameter from the browser redirect"
-                                    onTextEdited: function(text) {
-                                        if (anime) anime.malSyncAuthCode = text
-                                    }
-                                }
-                            }
-
-                            Column {
-                                width: parent.width
-                                spacing: 8
-
-                                Text {
-                                    text: "Auto Push"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                    color: Color.mOnSurface
-                                }
-
-                                Flow {
-                                    width: parent.width
-                                    spacing: 10
-
-                                    Repeater {
-                                        model: [
-                                            { label: "Manual", value: false },
-                                            { label: "Auto Push", value: true }
-                                        ]
-
-                                        delegate: SettingChoiceButton {
-                                            text: modelData.label
-                                            active: (anime?.malSync?.autoPush === true) === modelData.value
-                                            onClicked: if (anime) anime.setMalSyncField("autoPush", modelData.value)
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    width: parent.width
-                                    text: anime?.malSync?.autoPush
-                                        ? "Auto Push sends local watch changes to MyAnimeList after a short delay. Pulls and imports never push back automatically."
-                                        : "Manual only updates MyAnimeList when you press Push To MAL."
-                                    wrapMode: Text.Wrap
-                                    lineHeight: 1.35
-                                    font.pixelSize: 10
-                                    color: Color.mOnSurfaceVariant
-                                    opacity: 0.7
-                                }
-                            }
-
-                            Flow {
-                                width: parent.width
-                                spacing: 10
-
-                                ActionChip {
-                                    text: anime?.malSync?.enabled ? "Reconnect MAL" : "Connect MAL"
-                                    leadingText: "M"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.startMalBrowserAuth()
-                                }
-
-                                ActionChip {
-                                    text: "Refresh Session"
-                                    leadingText: "↺"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.refreshMalSyncSession(true)
-                                }
-
-                                ActionChip {
-                                    text: "Pull From MAL"
-                                    leadingText: "↓"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.pullMalSync(true)
-                                }
-
-                                ActionChip {
-                                    text: "Push To MAL"
-                                    leadingText: "↑"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.pushMalSync(true)
-                                }
-
-                                ActionChip {
-                                    text: "Disconnect"
-                                    leadingText: "✕"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    baseColor: Qt.rgba(Color.mSurfaceVariant.r, Color.mSurfaceVariant.g, Color.mSurfaceVariant.b, 0.86)
-                                    hoverColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
-                                    hoverBorderColor: Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.4)
-                                    hoverTextColor: Color.mError
-                                    onClicked: if (anime) anime.clearMalSyncSession()
-                                }
-
-                                ActionChip {
-                                    visible: settingsView.showMalAdvancedControls
-                                    text: anime?.malSyncShowAdvanced ? "Hide Advanced" : "Advanced"
-                                    leadingText: anime?.malSyncShowAdvanced ? "-" : "+"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.malSyncShowAdvanced = !anime.malSyncShowAdvanced
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: "Flow: click Connect MAL, approve access in the browser, then AnimeReloaded finishes the session automatically. Pull merges progress and can import MAL-only titles that resolve to AniList. Push sends AnimeReloaded progress back out."
-                                wrapMode: Text.Wrap
-                                lineHeight: 1.35
-                                font.pixelSize: 11
-                                color: Color.mOnSurfaceVariant
-                                opacity: 0.72
-                            }
-
-                            Text {
-                                visible: settingsView.showMalAdvancedControls
-                                    && !(anime?.malSyncShowAdvanced ?? false)
-                                width: parent.width
-                                text: "Advanced OAuth overrides stay hidden unless you need to debug a custom MAL app."
-                                wrapMode: Text.Wrap
-                                lineHeight: 1.35
-                                font.pixelSize: 10
-                                color: Color.mOnSurfaceVariant
-                                opacity: 0.62
-                            }
-
-                            Flow {
-                                visible: settingsView.showMalAdvancedControls
-                                    && (anime?.malSyncShowAdvanced ?? false)
-                                width: parent.width
-                                spacing: 10
-
-                                ActionChip {
-                                    text: "Open Auth"
-                                    leadingText: "↗"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.startMalAuth()
-                                }
-
-                                ActionChip {
-                                    text: "Finish Manual Connect"
-                                    leadingText: "✓"
-                                    enabled: !(anime?.isMalSyncBusy ?? false)
-                                    onClicked: if (anime) anime.exchangeMalAuthCode()
-                                }
-                            }
                         }
                     }
                 }
