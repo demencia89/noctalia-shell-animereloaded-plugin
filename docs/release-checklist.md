@@ -3,7 +3,6 @@
 ## Automated Checks
 
 - Run `python3 -m compileall anime-reloaded`
-- Run `node .github/workflows/update-registry.js` and confirm `registry.json` stays clean
 - Run `git diff --check`
 
 ## Manual Plugin Checks
