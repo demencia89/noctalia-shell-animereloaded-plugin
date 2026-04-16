@@ -17,6 +17,7 @@ Item {
     property var pluginApi: null
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
+    readonly property int librarySchemaVersion: 1
 
     function _pathJoin(base, child) {
         if (!base || base.length === 0)
@@ -100,6 +101,125 @@ Item {
         } catch (e) {
             return value
         }
+    }
+
+    function _isObject(value) {
+        return value !== null && value !== undefined
+            && typeof value === "object" && !Array.isArray(value)
+    }
+
+    function _inferMetadataProviderFromId(metadataId) {
+        var resolvedId = String(metadataId || "").trim()
+        if (resolvedId.length === 0)
+            return ""
+        if (/^\d+$/.test(resolvedId))
+            return "anilist"
+        return "allanime"
+    }
+
+    function _migrateLibraryEntrySchema(entry) {
+        var item = _deepClone(entry || {})
+        if (!_isObject(item))
+            item = ({})
+
+        var changed = false
+
+        if (!_isObject(item.providerRefs)) {
+            item.providerRefs = ({})
+            changed = true
+        } else {
+            item.providerRefs = _deepClone(item.providerRefs)
+        }
+
+        var metadataRef = _isObject(item.providerRefs.metadata)
+            ? _deepClone(item.providerRefs.metadata)
+            : ({})
+        var resolvedMetadataId = String(metadataRef.id || item.id || "").trim()
+        var resolvedMetadataProvider = String(metadataRef.provider || "").trim()
+        if ((resolvedMetadataProvider !== "anilist" && resolvedMetadataProvider !== "allanime")
+                && resolvedMetadataId.length > 0)
+            resolvedMetadataProvider = _inferMetadataProviderFromId(resolvedMetadataId)
+        if (resolvedMetadataId.length > 0) {
+            if (String(metadataRef.id || "") !== resolvedMetadataId
+                    || String(metadataRef.provider || "") !== resolvedMetadataProvider)
+                changed = true
+            item.providerRefs.metadata = {
+                provider: resolvedMetadataProvider,
+                id: resolvedMetadataId
+            }
+        } else if (item.providerRefs.metadata !== undefined) {
+            delete item.providerRefs.metadata
+            changed = true
+        }
+
+        if (_inferMetadataProviderFromId(resolvedMetadataId) === "allanime"
+                && !_isObject(item.providerRefs.stream)
+                && resolvedMetadataId.length > 0) {
+            item.providerRefs.stream = {
+                provider: "allanime",
+                id: resolvedMetadataId
+            }
+            changed = true
+        }
+
+        var syncRef = _isObject(item.providerRefs.sync)
+            ? _deepClone(item.providerRefs.sync)
+            : ({})
+        var syncId = String(syncRef.id || item.malId || "").trim()
+        var syncProvider = "myanimelist"
+        if (syncId.length > 0) {
+            if (String(syncRef.id || "") !== syncId
+                    || String(syncRef.provider || "") !== syncProvider)
+                changed = true
+            item.providerRefs.sync = {
+                provider: syncProvider,
+                id: syncId
+            }
+        } else if (item.providerRefs.sync !== undefined && !_isObject(item.providerRefs.sync)) {
+            delete item.providerRefs.sync
+            changed = true
+        }
+
+        if (item.malId !== undefined) {
+            delete item.malId
+            changed = true
+        }
+
+        return {
+            entry: item,
+            changed: changed
+        }
+    }
+
+    function _migrateLibrarySchemaIfNeeded() {
+        if (!pluginApi || !pluginApi.pluginSettings)
+            return
+
+        var currentVersion = Number(pluginApi.pluginSettings.librarySchemaVersion || 0)
+        if (currentVersion >= librarySchemaVersion)
+            return
+
+        var rawLibrary = pluginApi.pluginSettings.library
+        var migratedLibrary = []
+        var changed = currentVersion !== librarySchemaVersion
+        if (Array.isArray(rawLibrary)) {
+            for (var i = 0; i < rawLibrary.length; i++) {
+                var migrated = _migrateLibraryEntrySchema(rawLibrary[i])
+                migratedLibrary.push(migrated.entry)
+                if (migrated.changed)
+                    changed = true
+            }
+        } else if (rawLibrary !== undefined) {
+            changed = true
+        }
+
+        if (changed && Array.isArray(rawLibrary))
+            pluginApi.pluginSettings.library = migratedLibrary
+        else if (!Array.isArray(rawLibrary) && rawLibrary !== undefined)
+            pluginApi.pluginSettings.library = []
+
+        pluginApi.pluginSettings.librarySchemaVersion = librarySchemaVersion
+        pluginApi.saveSettings()
     }
 
     function _isVisibleGenre(genre) {
@@ -907,6 +1027,7 @@ Item {
         posterSize = _normalisePosterSize(panelSize, posterSize)
         if (pluginApi && pluginApi.pluginSettings)
             pluginApi.pluginSettings.posterSize = posterSize
+        _migrateLibrarySchemaIfNeeded()
         _loadLibrary()
         _loadFeedNotificationState()
         _ensureProgressDir()
