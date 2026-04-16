@@ -12,7 +12,7 @@ Version `3.0.0` is the first AnimeReloaded release baseline. This repository now
 - AllAnime preserved for episode resolution, stream lookup, and playback
 - season-aware detail flow so selecting another season opens that season and its episodes instead of flattening the whole franchise
 - local AniList `<->` AllAnime mapping/cache layer for safe playback resolution
-- feed focused on followed currently airing shows and newly relevant release events
+- feed focused on currently watched releasing shows that are close to caught up, plus newly relevant release events
 - MyAnimeList sync for account progress, without switching in-app metadata away from AniList
 - polished Noctalia-native UI with smoother card scrolling, consistent chips/buttons, and refreshed library/settings flows
 
@@ -46,10 +46,11 @@ Library panel:
 - Browse and search are AniList-backed.
 - Detail pages use AniList metadata and show season-level navigation, relations, and season-specific episodes.
 - Playback still resolves through AllAnime when the user actually starts an episode.
-- Library supports richer progression filters such as `Continue`, `In Progress`, `Up To Date`, and `Completed`, plus type filters.
-- Followed airing shows feed into a cleaner Feed tab oriented around release relevance instead of generic library noise.
+- Library uses MyAnimeList-style list statuses: `Watching`, `Completed`, `On Hold`, `Dropped`, and `Plan To Watch`.
+- Library status chips support multi-select filtering, and local status handling now stays aligned with MAL sync semantics.
+- Feed tracks releasing seasons you are actively watching and close to current on, then surfaces new episodes when they become relevant.
 - Detail and library progress actions support catching up or marking fully watched when appropriate.
-- MyAnimeList sync supports browser login, refresh, pull, push, optional auto-push, per-title sync badges, and a practical sync-status overview.
+- MyAnimeList sync supports browser login, refresh, pull, push, optional auto-push, per-title sync badges, and MAL-aligned status/progress payloads.
 
 ## Architecture
 
@@ -68,11 +69,13 @@ Library panel:
 
 ## Feed Direction
 
-Feed is no longer treated as “library items close to caught up”.
+Feed is no longer treated as a generic “everything in the library that might be airing” list.
 
-Current behavior is centered on followed airing shows:
+Current behavior is centered on actively watched releasing seasons:
 
 - AniList airing status and next-airing data drive eligibility
+- only `watching` entries that are near current pace are followed automatically
+- titles that drift too far behind fall out of Feed until you catch back up
 - followed titles are evaluated as specific AniList season/media entries
 - newly relevant episode events are surfaced more clearly
 - uncertain legacy mappings are skipped instead of guessed
@@ -87,10 +90,17 @@ Current MAL sync behavior:
 
 - browser auth with localhost callback capture from Settings
 - `Pull From MAL` to merge external progress and import MAL-only titles that resolve confidently to AniList
-- `Push To MAL` to send local AnimeReloaded progress outward
+- `Push To MAL` to send both local status and watched-episode progress outward
 - optional auto-push after local watch changes
 - per-show MAL badges in Library and Detail
 - sync overview focused on titles needing attention, ready-to-push titles, and recently synced titles
+
+Status handling now follows MAL-style rules closely:
+
+- new library entries start as `plan_to_watch`
+- starting progress promotes them to `watching`
+- known completions are pushed as `completed`
+- `on_hold` and `dropped` are treated as explicit states rather than inferred guesses
 
 Advanced OAuth override controls are intentionally hidden for normal use right now.
 
@@ -144,7 +154,7 @@ AnimeReloaded stores local runtime data in the plugin directory with `anime-relo
 
 - Playback still depends on a valid AniList -> AllAnime mapping.
 - Some imported MAL titles may sync correctly but still need a resolvable AllAnime mapping before playback works.
-- Feed is already airing-aware, but it is still a pragmatic release alert list rather than a full notification platform.
+- Feed is already airing-aware and progression-aware, but it is still a pragmatic release alert list rather than a full notification platform.
 - Legacy library/feed compatibility exists, but not every old entry is migrated in-place automatically.
 
 ## Related Links

@@ -11,15 +11,15 @@ Item {
     property var pluginApi: null
     readonly property var anime: pluginApi?.mainInstance || null
     property string librarySearchQuery: ""
-    property string progressFilter: "all"
+    property var progressFilters: []
     property string typeFilter: "all"
     readonly property var progressFilterOptions: [
         { key: "all", label: "All" },
-        { key: "not-started", label: "Not Started" },
-        { key: "continue", label: "Continue" },
-        { key: "in-progress", label: "In Progress" },
-        { key: "up-to-date", label: "Up to Date" },
-        { key: "completed", label: "Completed" }
+        { key: "watching", label: "Watching" },
+        { key: "completed", label: "Completed" },
+        { key: "on_hold", label: "On Hold" },
+        { key: "dropped", label: "Dropped" },
+        { key: "plan_to_watch", label: "Plan To Watch" }
     ]
     readonly property var typeFilterOptions: [
         { key: "all", label: "All Types" },
@@ -29,7 +29,7 @@ Item {
         { key: "other", label: "Other" }
     ]
     readonly property bool hasActiveFilters:
-        progressFilter !== "all" || typeFilter !== "all"
+        (progressFilters?.length ?? 0) > 0 || typeFilter !== "all"
 
     signal animeSelected(var show)
     signal settingsRequested()
@@ -100,19 +100,42 @@ Item {
     }
 
     function resetFilters() {
-        progressFilter = "all"
+        progressFilters = []
         typeFilter = "all"
+    }
+
+    function _isStatusFilterSelected(key) {
+        if (key === "all")
+            return (progressFilters?.length ?? 0) === 0
+        return (progressFilters || []).indexOf(String(key || "")) !== -1
+    }
+
+    function toggleStatusFilter(key) {
+        var statusKey = String(key || "")
+        if (statusKey === "all") {
+            progressFilters = []
+            return
+        }
+
+        var next = (progressFilters || []).slice()
+        var index = next.indexOf(statusKey)
+        if (index >= 0)
+            next.splice(index, 1)
+        else
+            next.push(statusKey)
+        progressFilters = next
     }
 
     function _activeFilterSummary() {
         var parts = []
-        var progressLabel = null
+        var progressLabels = []
         var typeLabel = null
         for (var i = 0; i < progressFilterOptions.length; i++) {
-            if (progressFilterOptions[i].key === progressFilter) {
-                progressLabel = progressFilterOptions[i]
-                break
-            }
+            var option = progressFilterOptions[i]
+            if (option.key === "all")
+                continue
+            if (_isStatusFilterSelected(option.key))
+                progressLabels.push(option.label)
         }
         for (var j = 0; j < typeFilterOptions.length; j++) {
             if (typeFilterOptions[j].key === typeFilter) {
@@ -120,11 +143,11 @@ Item {
                 break
             }
         }
-        if (progressFilter !== "all" && progressLabel)
-            parts.push(progressLabel.label)
+        if (progressLabels.length > 0)
+            parts.push(progressLabels.join(", "))
         if (typeFilter !== "all" && typeLabel)
             parts.push(typeLabel.label)
-        return parts.length > 0 ? parts.join(" · ") : "Progress and type"
+        return parts.length > 0 ? parts.join(" · ") : "Status and type"
     }
 
     function _numericValue(value) {
@@ -170,58 +193,20 @@ Item {
             _entryHasActiveProgress(entry)
     }
 
-    function _entryAvailableCount(entry) {
-        var mode = anime?.currentMode || "sub"
-        var available = entry?.availableEpisodes || {}
-        var count = _numericValue(available[mode] || 0)
-        if (count <= 0)
-            count = _numericValue(available.sub || available.raw || 0)
-        return count
-    }
-
-    function _entryCompleted(entry) {
-        var totalEpisodes = _numericValue(entry?.episodeCount || 0)
-        if (totalEpisodes <= 0)
-            return false
-        return _entryProgressCount(entry) >= totalEpisodes
-    }
-
-    function _entryUpToDate(entry) {
-        if (!_entryStarted(entry) || _entryCompleted(entry))
-            return false
-        var available = _entryAvailableCount(entry)
-        if (available <= 0)
-            return false
-        return _entryProgressCount(entry) >= available
-    }
-
     function _entryProgressState(entry) {
-        if (_entryCompleted(entry))
-            return { key: "completed", label: "Completed" }
-        if (_entryHasActiveProgress(entry))
-            return { key: "continue", label: "Continue" }
-        if (_entryUpToDate(entry))
-            return { key: "up-to-date", label: "Up to Date" }
-        if (_entryStarted(entry))
-            return { key: "in-progress", label: "In Progress" }
-        return { key: "not-started", label: "Not Started" }
+        if (anime?.libraryListStatusState)
+            return anime.libraryListStatusState(entry)
+        return {
+            key: _entryStarted(entry) ? "watching" : "plan_to_watch",
+            label: _entryStarted(entry) ? "Watching" : "Plan To Watch"
+        }
     }
 
     function _matchesProgressFilter(entry) {
-        switch (progressFilter) {
-        case "not-started":
-            return !_entryStarted(entry)
-        case "continue":
-            return _entryHasActiveProgress(entry)
-        case "in-progress":
-            return _entryStarted(entry) && !_entryCompleted(entry) && !_entryUpToDate(entry)
-        case "up-to-date":
-            return _entryUpToDate(entry)
-        case "completed":
-            return _entryCompleted(entry)
-        default:
+        var activeFilters = progressFilters || []
+        if (activeFilters.length === 0)
             return true
-        }
+        return activeFilters.indexOf(_entryProgressState(entry).key) !== -1
     }
 
     function _entryTypeGroup(entry) {
@@ -271,6 +256,56 @@ Item {
         if (tone === "primary")
             return Color.mPrimary
         return Color.mOnSurfaceVariant
+    }
+
+    function _statusFillColor(key) {
+        var status = String(key || "")
+        var secondary = _themeColor("mSecondary", Color.mPrimary)
+        var tertiary = _themeColor("mTertiary", Color.mPrimary)
+        if (status === "watching")
+            return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.92)
+        if (status === "completed")
+            return Qt.rgba(secondary.r, secondary.g, secondary.b, 0.9)
+        if (status === "on_hold")
+            return Qt.rgba(tertiary.r, tertiary.g, tertiary.b, 0.9)
+        if (status === "dropped")
+            return Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+        return Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88)
+    }
+
+    function _statusBorderColor(key) {
+        var status = String(key || "")
+        var secondary = _themeColor("mSecondary", Color.mPrimary)
+        var tertiary = _themeColor("mTertiary", Color.mPrimary)
+        if (status === "watching")
+            return Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.95)
+        if (status === "completed")
+            return Qt.rgba(secondary.r, secondary.g, secondary.b, 0.95)
+        if (status === "on_hold")
+            return Qt.rgba(tertiary.r, tertiary.g, tertiary.b, 0.95)
+        if (status === "dropped")
+            return Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.42)
+        return _withAlpha(_outlineVariantColor(), 0.42)
+    }
+
+    function _statusTextColor(key) {
+        var status = String(key || "")
+        if (status === "watching")
+            return Color.mOnPrimary
+        if (status === "completed")
+            return _themeColor("mOnSecondary", Color.mOnPrimary)
+        if (status === "on_hold")
+            return _themeColor("mOnTertiary", Color.mOnSurface)
+        if (status === "dropped")
+            return Color.mError
+        return Color.mOnSurface
+    }
+
+    function _statusDisplayLabel(state) {
+        var key = String(state?.key || "")
+        if (key === "plan_to_watch")
+            return "Planned"
+        return String(state?.label || "")
     }
 
     function openSearch() {
@@ -541,7 +576,7 @@ Item {
                                 Text {
                                     id: filterLabel
                                     anchors.centerIn: parent
-                                    text: "Library Filters"
+                                    text: "MAL Status Filters"
                                     font.pixelSize: 10
                                     font.bold: true
                                     font.letterSpacing: 0.6
@@ -591,7 +626,7 @@ Item {
                                     spacing: 8
 
                                     Text {
-                                        text: "Progress"
+                                        text: "Status"
                                         font.pixelSize: 10
                                         font.bold: true
                                         font.letterSpacing: 0.7
@@ -608,9 +643,9 @@ Item {
 
                                             delegate: ChoiceChip {
                                                 text: modelData.label
-                                                selected: libraryView.progressFilter === modelData.key
+                                                selected: libraryView._isStatusFilterSelected(modelData.key)
                                                 fontPixelSize: 11
-                                                onClicked: libraryView.progressFilter = modelData.key
+                                                onClicked: libraryView.toggleStatusFilter(modelData.key)
                                             }
                                         }
                                     }
@@ -950,34 +985,22 @@ Item {
                                     }
 
                                     Rectangle {
-                                        visible: progressState.key !== "not-started"
+                                        visible: progressState.label.length > 0
                                         anchors { top: parent.top; right: parent.right; topMargin: 6; rightMargin: 6 }
                                         height: 18
                                         width: statusText.implicitWidth + 12
                                         radius: 9
-                                        color: progressState.key === "completed"
-                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.92)
-                                            : (progressState.key === "up-to-date"
-                                                ? Qt.rgba(Color.mSecondary.r, Color.mSecondary.g, Color.mSecondary.b, 0.9)
-                                                : Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.88))
+                                        color: libraryView._statusFillColor(progressState.key)
                                         border.width: 1
-                                        border.color: progressState.key === "completed"
-                                            ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.95)
-                                            : (progressState.key === "up-to-date"
-                                                ? Qt.rgba(Color.mSecondary.r, Color.mSecondary.g, Color.mSecondary.b, 0.95)
-                                                : _withAlpha(_outlineVariantColor(), 0.42))
+                                        border.color: libraryView._statusBorderColor(progressState.key)
 
                                         Text {
                                             id: statusText
                                             anchors.centerIn: parent
-                                            text: progressState.label
+                                            text: libraryView._statusDisplayLabel(progressState)
                                             font.pixelSize: 8
                                             font.bold: true
-                                            color: progressState.key === "completed"
-                                                ? Color.mOnPrimary
-                                                : (progressState.key === "up-to-date"
-                                                    ? Color.mOnSecondary
-                                                    : Color.mOnSurface)
+                                            color: libraryView._statusTextColor(progressState.key)
                                         }
                                     }
 
@@ -1037,18 +1060,21 @@ Item {
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: "▶"; font.pixelSize: 7
-                                        color: entry.lastWatchedEpNum ? Color.mPrimary : Color.mOutline
-                                        opacity: entry.lastWatchedEpNum ? 1 : 0.4
+                                        color: entry.lastWatchedEpNum
+                                            ? Color.mPrimary
+                                            : libraryView._statusTextColor(progressState.key)
+                                        opacity: entry.lastWatchedEpNum ? 1 : 0.56
                                     }
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: entry.lastWatchedEpNum
                                             ? "Ep. " + entry.lastWatchedEpNum
-                                            : "Not started"
+                                            : libraryView._statusDisplayLabel(progressState)
                                         font.pixelSize: 10; font.letterSpacing: 0.4
                                         color: entry.lastWatchedEpNum
-                                            ? Color.mOnSurface : Color.mOnSurfaceVariant
-                                        opacity: entry.lastWatchedEpNum ? 0.85 : 0.45
+                                            ? Color.mOnSurface
+                                            : libraryView._statusTextColor(progressState.key)
+                                        opacity: entry.lastWatchedEpNum ? 0.85 : 0.82
                                     }
 
                                     Rectangle {

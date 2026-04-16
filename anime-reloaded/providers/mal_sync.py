@@ -383,6 +383,135 @@ def _local_watched_episodes(entry):
     return watched
 
 
+def _normalise_list_status(value):
+    status = str(value or "").strip().lower()
+    if status in {"plan_to_watch", "watching", "completed", "on_hold", "dropped"}:
+        return status
+    return ""
+
+
+def _normalise_user_action(value):
+    action = str(value or "").strip().lower()
+    if action in {"play", "pause", "drop", "complete"}:
+        return action
+    return ""
+
+
+def _normalise_episode_count(value):
+    parsed = _parse_int(value)
+    if parsed <= 0:
+        return 0
+    return parsed
+
+
+def _has_saved_progress(entry):
+    progress = dict((entry or {}).get("episodeProgress") or {})
+    for value in progress.values():
+        if isinstance(value, dict):
+            position = _parse_int(value.get("position"))
+        else:
+            position = _parse_int(value)
+        if position > 0:
+            return True
+    return False
+
+
+def _status_signal_watched_episodes(entry):
+    watched = _local_watched_episodes(entry)
+    if watched <= 0 and _has_saved_progress(entry):
+        watched = 1
+    return watched
+
+
+def update_anime_status(*, watched_episodes=0, total_episodes=0, user_action=None, current_status=""):
+    status = _normalise_list_status(current_status)
+    watched = _normalise_episode_count(watched_episodes)
+    total = _normalise_episode_count(total_episodes)
+    action = _normalise_user_action(user_action)
+
+    if total > 0 and watched > total:
+        watched = total
+
+    if action == "complete":
+        if total > 0:
+            watched = total
+        return {
+            "status": "completed",
+            "watchedEpisodes": watched,
+        }
+
+    if action == "pause":
+        return {
+            "status": "on_hold",
+            "watchedEpisodes": watched,
+        }
+
+    if action == "drop":
+        return {
+            "status": "dropped",
+            "watchedEpisodes": watched,
+        }
+
+    if action == "play":
+        if watched <= 0:
+            return {
+                "status": "plan_to_watch",
+                "watchedEpisodes": 0,
+            }
+        if total > 0 and watched >= total:
+            return {
+                "status": "completed",
+                "watchedEpisodes": total,
+            }
+        return {
+            "status": "watching",
+            "watchedEpisodes": watched,
+        }
+
+    if status in {"on_hold", "dropped"}:
+        return {
+            "status": status,
+            "watchedEpisodes": watched,
+        }
+
+    if watched <= 0:
+        return {
+            "status": "plan_to_watch",
+            "watchedEpisodes": 0,
+        }
+
+    if total > 0 and watched >= total:
+        return {
+            "status": "completed",
+            "watchedEpisodes": total,
+        }
+
+    if status == "completed" and total <= 0:
+        return {
+            "status": "completed",
+            "watchedEpisodes": watched,
+        }
+
+    return {
+        "status": "watching",
+        "watchedEpisodes": watched,
+    }
+
+
+def build_mal_payload(anime_id, status, watched_episodes):
+    watched = _normalise_episode_count(watched_episodes)
+    resolved_status = _normalise_list_status(status)
+    if not resolved_status:
+        resolved_status = "watching" if watched > 0 else "plan_to_watch"
+    if resolved_status == "plan_to_watch":
+        watched = 0
+    return {
+        "anime_id": str(anime_id or "").strip(),
+        "status": resolved_status,
+        "num_watched_episodes": watched,
+    }
+
+
 def _remote_watched_episodes(payload):
     status = (payload or {}).get("my_list_status") or (payload or {}).get("list_status") or {}
     return max(
@@ -407,41 +536,59 @@ def _total_episode_count(entry, remote_payload=None):
 
 
 def _local_status(entry, remote_payload=None):
-    watched = _local_watched_episodes(entry)
-    total = _total_episode_count(entry, remote_payload)
-    if watched <= 0:
-        return "plan_to_watch"
-    if total > 0 and watched >= total:
-        return "completed"
-    return "watching"
+    resolved = update_anime_status(
+        current_status=(entry or {}).get("listStatus"),
+        watched_episodes=_status_signal_watched_episodes(entry),
+        total_episodes=_total_episode_count(entry, remote_payload),
+    )
+    return resolved["status"]
 
 
 def _apply_remote_progress(entry, remote_payload):
     item = dict(entry or {})
-    watched = _remote_watched_episodes(remote_payload)
     list_status = (remote_payload or {}).get("my_list_status") or {}
     total = _total_episode_count(item, remote_payload)
-    remote_status = str(list_status.get("status") or "").strip().lower()
-    if remote_status == "completed" and total > watched:
-        watched = total
-    if watched <= 0:
-        return item, False
+    remote_status = _normalise_list_status(list_status.get("status"))
+    remote_state = update_anime_status(
+        current_status=remote_status,
+        watched_episodes=_remote_watched_episodes(remote_payload),
+        total_episodes=total,
+        user_action="complete" if remote_status == "completed" else None,
+    )
+    original_state = update_anime_status(
+        current_status=item.get("listStatus"),
+        watched_episodes=_status_signal_watched_episodes(item),
+        total_episodes=total,
+    )
+    watched = int(remote_state.get("watchedEpisodes") or 0)
+    status_changed = (
+        original_state.get("status") != remote_state.get("status")
+        or int(original_state.get("watchedEpisodes") or 0) != watched
+    )
 
-    local_watched = _local_watched_episodes(item)
-    if watched <= local_watched:
-        return item, False
+    item["listStatus"] = remote_state.get("status") or "plan_to_watch"
+    item["lastWatchedEpId"] = ""
+
+    if watched <= 0:
+        item["lastWatchedEpNum"] = ""
+        item["watchedEpisodes"] = []
+        item["episodeProgress"] = {}
+        if status_changed:
+            item["updatedAt"] = int(time.time() * 1000)
+        return item, status_changed
 
     watched_episodes = [str(number) for number in range(1, watched + 1)]
     progress = dict(item.get("episodeProgress") or {})
-    for number in watched_episodes:
-        progress.pop(number, None)
+    for number in list(progress.keys()):
+        if _parse_int(number) <= watched:
+            progress.pop(number, None)
 
-    item["lastWatchedEpNum"] = str(watched)
-    item["lastWatchedEpId"] = ""
     item["watchedEpisodes"] = watched_episodes
+    item["lastWatchedEpNum"] = str(watched)
     item["episodeProgress"] = progress
-    item["updatedAt"] = int(time.time() * 1000)
-    return item, True
+    if status_changed:
+        item["updatedAt"] = int(time.time() * 1000)
+    return item, status_changed
 
 
 def _remote_status_payload(remote_entry):
@@ -590,14 +737,19 @@ def push_library(config, library_entries):
                 })
                 continue
 
-            watched = _local_watched_episodes(entry)
-            status = _local_status(entry)
+            total = _total_episode_count(entry)
+            state = update_anime_status(
+                current_status=(entry or {}).get("listStatus"),
+                watched_episodes=_status_signal_watched_episodes(entry),
+                total_episodes=total,
+            )
+            payload = build_mal_payload(mal_id, state.get("status"), _local_watched_episodes(entry))
             try:
                 remote = mal_client.update_anime_list_status(
                     current_config.get("accessToken"),
-                    mal_id,
-                    status=status,
-                    num_watched_episodes=watched,
+                    payload["anime_id"],
+                    status=payload["status"],
+                    num_watched_episodes=payload["num_watched_episodes"],
                 )
                 pushed += 1
                 results.append({
@@ -605,8 +757,8 @@ def push_library(config, library_entries):
                     "malId": mal_id,
                     "title": str((entry or {}).get("englishName") or (entry or {}).get("name") or ""),
                     "status": "updated",
-                    "remoteStatus": str((remote.get("status") or status)),
-                    "watchedEpisodes": watched,
+                    "remoteStatus": str((remote.get("status") or payload["status"])),
+                    "watchedEpisodes": payload["num_watched_episodes"],
                 })
             except Exception as exc:
                 if isinstance(exc, mal_client.MalApiError) and exc.is_content_filter:

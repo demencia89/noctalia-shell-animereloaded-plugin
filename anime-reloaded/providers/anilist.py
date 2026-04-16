@@ -363,6 +363,13 @@ def _entry_last_watched(entry):
         return 0
 
 
+def _entry_list_status(entry):
+    value = str((entry or {}).get("listStatus") or "").strip().lower()
+    if value in ("watching", "completed", "on_hold", "dropped", "plan_to_watch"):
+        return value
+    return "plan_to_watch"
+
+
 def _follow_mode(entry):
     value = str((entry or {}).get("feedFollowMode") or "auto").strip().lower()
     if value in ("following", "muted"):
@@ -370,22 +377,52 @@ def _follow_mode(entry):
     return "auto"
 
 
-def _is_following_entry(entry, latest_released, next_episode):
+def _feed_tracking_state(entry, latest_released, next_episode):
     last_watched = _entry_last_watched(entry)
     if last_watched <= 0:
-        return False
+        return {
+            "eligible": False,
+            "status": _entry_list_status(entry),
+            "followMode": _follow_mode(entry),
+            "lastWatched": last_watched,
+            "releaseGap": max(0, int(latest_released) - last_watched),
+            "nextGap": max(0, int(next_episode) - last_watched),
+            "upcomingEligible": False,
+        }
 
     follow_mode = _follow_mode(entry)
-    if follow_mode == "muted":
-        return False
-    if follow_mode == "following":
-        return True
+    status = _entry_list_status(entry)
+    release_gap = max(0, int(latest_released) - last_watched)
+    next_gap = max(0, int(next_episode) - last_watched)
 
-    if latest_released > 0:
-        return max(0, int(latest_released) - last_watched) <= 2
-    if next_episode > 0:
-        return max(0, int(next_episode) - last_watched) <= 1
-    return False
+    if follow_mode == "muted":
+        return {
+            "eligible": False,
+            "status": status,
+            "followMode": follow_mode,
+            "lastWatched": last_watched,
+            "releaseGap": release_gap,
+            "nextGap": next_gap,
+            "upcomingEligible": False,
+        }
+
+    manually_following = follow_mode == "following"
+    automatically_following = status == "watching" and release_gap <= 2
+    eligible = manually_following or automatically_following
+    upcoming_eligible = (
+        (manually_following and next_gap <= 1)
+        or (status == "watching" and release_gap == 0 and next_gap == 1)
+    )
+
+    return {
+        "eligible": eligible,
+        "status": status,
+        "followMode": follow_mode,
+        "lastWatched": last_watched,
+        "releaseGap": release_gap,
+        "nextGap": next_gap,
+        "upcomingEligible": upcoming_eligible,
+    }
 
 
 def _season_entry_from_media(media, relation_type=""):
@@ -415,6 +452,16 @@ def _season_entry_from_media(media, relation_type=""):
         }
     item["providerRefs"] = refs
     return item
+
+
+def _feed_reason_text(release_gap, follow_mode):
+    if follow_mode == "following":
+        return "Pinned to Feed"
+    if release_gap <= 0:
+        return "Caught up"
+    if release_gap == 1:
+        return "One behind"
+    return "Near current"
 
 
 def _is_season_relation(edge, node):
@@ -796,12 +843,10 @@ class AniListMetadataProvider(MetadataProvider):
 
             for context in contexts_by_media_id.get(media_id) or []:
                 entry = context.get("entry") or {}
-                last_watched = _entry_last_watched(entry)
-                if last_watched <= 0:
+                tracking = _feed_tracking_state(entry, latest_released, next_episode)
+                if not tracking.get("eligible"):
                     continue
-
-                if not _is_following_entry(entry, latest_released, next_episode):
-                    continue
+                last_watched = int(tracking.get("lastWatched") or 0)
                 followed_media_ids.add(media_id)
 
                 new_count = int(max(0, latest_released - last_watched))
@@ -825,24 +870,33 @@ class AniListMetadataProvider(MetadataProvider):
                     "nextEpisode": str(int(last_watched) + 1),
                     "watchedThrough": str(last_watched),
                     "newCount": new_count,
+                    "watchGap": int(tracking.get("releaseGap") or 0),
+                    "nextGap": int(tracking.get("nextGap") or 0),
+                    "nearCurrent": int(tracking.get("releaseGap") or 0) <= 1,
+                    "trackingStatus": tracking.get("status") or "",
                     "latestReleasedEpisode": str(latest_released),
                     "status": media.get("status") or "",
                     "statusLabel": _status_label(media.get("status")),
                     "releaseText": _release_text(latest_released, next_episode, airing_at, now_ts),
                     "airingAt": airing_at or None,
                     "timeUntilAiring": time_until if airing_at and airing_at > now_ts else None,
-                    "followMode": _follow_mode(entry),
+                    "followMode": tracking.get("followMode") or _follow_mode(entry),
+                    "feedReason": _feed_reason_text(int(tracking.get("releaseGap") or 0), tracking.get("followMode")),
                 })
                 if new_count > 0:
                     item["feedKind"] = "release"
                     item["eventEpisode"] = str(latest_released)
                     item["eventKey"] = f"episode_release:{media_id}:{latest_released}"
                     alerts.append(item)
-                elif airing_at and airing_at > now_ts and next_episode > last_watched:
+                elif (
+                    tracking.get("upcomingEligible")
+                    and airing_at and airing_at > now_ts
+                    and next_episode > last_watched
+                ):
                     item["feedKind"] = "upcoming"
                     upcoming.append(item)
 
-        alerts.sort(key=lambda item: ((item.get("timeUntilAiring") is None), item.get("timeUntilAiring") or 0, item.get("title") or ""))
+        alerts.sort(key=lambda item: (item.get("watchGap") or 0, (item.get("timeUntilAiring") is None), item.get("timeUntilAiring") or 0, item.get("title") or ""))
         upcoming.sort(key=lambda item: (item.get("timeUntilAiring") is None, item.get("timeUntilAiring") or 0, item.get("title") or ""))
         return {
             "results": alerts,

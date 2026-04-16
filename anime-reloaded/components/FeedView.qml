@@ -102,8 +102,11 @@ Item {
 
     function _alertSubtitle(item) {
         var watched = String(item?.watchedThrough || "")
-        if (watched.length > 0)
-            return "You watched through episode " + watched
+        var gap = Number(item?.watchGap || 0)
+        if (watched.length > 0 && gap <= 1)
+            return "You were caught up through episode " + watched
+        if (watched.length > 0 && gap === 2)
+            return "You were one episode behind before this release"
         return item?.releaseText || "Ready to catch up"
     }
 
@@ -117,7 +120,7 @@ Item {
     function _upcomingSubtitle(item) {
         var watched = String(item?.watchedThrough || "")
         if (watched.length > 0)
-            return "Caught up through episode " + watched
+            return "Current through episode " + watched
         return "Currently on schedule"
     }
 
@@ -324,8 +327,8 @@ Item {
                             wrapMode: Text.Wrap
                             lineHeight: 1.35
                             text: (anime?.libraryList?.length ?? 0) > 0
-                                ? "Feed will surface new airing episodes once you start keeping up with a currently releasing season."
-                                : "Add anime to your library and Feed will surface new episode releases for airing shows you are actively following."
+                                ? "Feed tracks releasing seasons you are actively watching and close to caught up on. New episodes appear here when the next release becomes relevant."
+                                : "Add anime to your library and keep a releasing season in Watching so Feed can surface new episode releases as they drop."
                             font.pixelSize: 11
                             color: Color.mOnSurfaceVariant
                             opacity: 0.74
@@ -372,7 +375,7 @@ Item {
                                     subtitle: ""
                                 },
                                 {
-                                    title: "Following",
+                                    title: "Watching Closely",
                                     value: feedView._summaryValue(feedSummary.following),
                                     accent: "surface",
                                     subtitle: ""
@@ -570,6 +573,25 @@ Item {
                                                         font.pixelSize: 8
                                                         font.bold: true
                                                         color: Color.mPrimary
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    visible: String(itemData.feedReason || "").length > 0
+                                                    height: 18
+                                                    width: reasonText.implicitWidth + 10
+                                                    radius: 9
+                                                    color: Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.14)
+                                                    border.width: 1
+                                                    border.color: Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.24)
+
+                                                    Text {
+                                                        id: reasonText
+                                                        anchors.centerIn: parent
+                                                        text: itemData.feedReason || ""
+                                                        font.pixelSize: 8
+                                                        font.bold: true
+                                                        color: Color.mTertiary
                                                     }
                                                 }
 
@@ -789,6 +811,25 @@ Item {
                                                         font.pixelSize: 8
                                                         font.bold: true
                                                         color: Color.mSecondary
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    visible: String(itemData.feedReason || "").length > 0
+                                                    height: 18
+                                                    width: upcomingReasonText.implicitWidth + 10
+                                                    radius: 9
+                                                    color: Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.14)
+                                                    border.width: 1
+                                                    border.color: Qt.rgba(Color.mTertiary.r, Color.mTertiary.g, Color.mTertiary.b, 0.24)
+
+                                                    Text {
+                                                        id: upcomingReasonText
+                                                        anchors.centerIn: parent
+                                                        text: itemData.feedReason || ""
+                                                        font.pixelSize: 8
+                                                        font.bold: true
+                                                        color: Color.mTertiary
                                                     }
                                                 }
 

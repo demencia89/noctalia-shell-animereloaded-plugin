@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Services.UI
+import "MalStatus.js" as MalStatus
 
 Item {
     id: root
@@ -467,8 +468,12 @@ Item {
         return null
     }
 
-    function _malListStatusLabel(value) {
-        var status = String(value || "").trim().toLowerCase()
+    function _normaliseMalListStatus(value) {
+        return MalStatus.normaliseMalStatus(value)
+    }
+
+    function malListStatusLabel(value) {
+        var status = _normaliseMalListStatus(value)
         if (status === "plan_to_watch")
             return "Plan To Watch"
         if (status === "watching")
@@ -485,7 +490,7 @@ Item {
     function _malResultFacts(result) {
         var parts = []
         var watched = Number(result?.watchedEpisodes || 0)
-        var remoteStatus = _malListStatusLabel(result?.remoteStatus)
+        var remoteStatus = malListStatusLabel(result?.remoteStatus)
         if (remoteStatus.length > 0)
             parts.push("Status: " + remoteStatus + ".")
         if (watched > 0)
@@ -506,6 +511,56 @@ Item {
         if (Array.isArray(watchedEpisodes))
             watched = Math.max(watched, watchedEpisodes.length)
         return watched
+    }
+
+    function _entryHasSavedProgress(entry) {
+        var progress = entry?.episodeProgress || {}
+        var keys = Object.keys(progress)
+        for (var i = 0; i < keys.length; i++) {
+            if (_progressPosition(progress[keys[i]]) > 0)
+                return true
+        }
+        return false
+    }
+
+    function _entryWatchedEpisodesForStatus(entry) {
+        var watched = _showLocalWatchedEpisodes(entry)
+        if (watched <= 0 && _entryHasSavedProgress(entry))
+            watched = 1
+        return watched
+    }
+
+    function resolveAnimeStatus(input) {
+        return MalStatus.resolveAnimeStatus(input || ({}))
+    }
+
+    function updateAnimeStatus(input) {
+        return MalStatus.updateAnimeStatus(input || ({}))
+    }
+
+    function buildMalPayload(animeId, status, watchedEpisodes) {
+        return MalStatus.buildMalPayload(animeId, status, watchedEpisodes)
+    }
+
+    function _resolvedLibraryStatus(entry, userAction) {
+        return resolveAnimeStatus({
+            currentStatus: _normaliseMalListStatus(entry?.listStatus),
+            watchedEpisodes: _entryWatchedEpisodesForStatus(entry),
+            totalEpisodes: Number(entry?.episodeCount || 0),
+            userAction: userAction || null
+        })
+    }
+
+    function libraryListStatus(entry) {
+        return _resolvedLibraryStatus(entry, null).status
+    }
+
+    function libraryListStatusState(entry) {
+        var key = libraryListStatus(entry)
+        return {
+            key: key,
+            label: malListStatusLabel(key) || "Plan To Watch"
+        }
     }
 
     function _malSyncBadgeData(show, compact, includeWhenDisconnected) {
@@ -606,8 +661,9 @@ Item {
         var result = _findMalSyncResult(entry)
         var watched = _showLocalWatchedEpisodes(entry)
         var total = Number(entry?.episodeCount || 0)
-        var remoteStatus = _malListStatusLabel(result?.remoteStatus)
+        var remoteStatus = malListStatusLabel(result?.remoteStatus)
         var remoteWatched = Number(result?.watchedEpisodes || 0)
+        var localStatus = libraryListStatus(entry)
         var localProgress = watched > 0
             ? ("Local: " + watched + (total > 0 ? " / " + total : "") + " episodes")
             : (total > 0 ? ("Local: 0 / " + total + " episodes") : "Local: not started")
@@ -620,6 +676,8 @@ Item {
             badge: badge,
             badgeKey: String(badge?.key || "disabled"),
             badgeTone: String(badge?.tone || "muted"),
+            localStatus: localStatus,
+            localStatusLabel: malListStatusLabel(localStatus),
             localProgress: localProgress,
             remoteStatus: remoteStatus,
             remoteWatchedEpisodes: remoteWatched,
@@ -868,6 +926,7 @@ Item {
         item.episodeProgress = (item.episodeProgress && typeof item.episodeProgress === "object" && !Array.isArray(item.episodeProgress))
             ? _deepClone(item.episodeProgress)
             : ({})
+        item.listStatus = libraryListStatus(item)
         item.updatedAt = Number(item.updatedAt || Date.now())
         return item
     }
@@ -891,7 +950,14 @@ Item {
             merged.watchedEpisodes = []
         if (!merged.episodeProgress || typeof merged.episodeProgress !== "object" || Array.isArray(merged.episodeProgress))
             merged.episodeProgress = ({})
+        merged.listStatus = libraryListStatus(merged)
         merged.updatedAt = Number(merged.updatedAt || Date.now())
+        return merged
+    }
+
+    function _mergeProgressDrivenLibraryEntry(entry, overrides, userAction) {
+        var merged = _mergeLibraryEntry(entry, overrides)
+        merged.listStatus = _resolvedLibraryStatus(merged, userAction || null).status
         return merged
     }
 
@@ -955,8 +1021,14 @@ Item {
         return 0
     }
 
-    function _makeEntry(show, lastEpId, lastEpNum) {
+    function _makeEntry(show, lastEpId, lastEpNum, listStatus) {
         var providerRefs = _deepClone(show?.providerRefs || {})
+        var initialStatus = resolveAnimeStatus({
+            currentStatus: _normaliseMalListStatus(listStatus || ""),
+            watchedEpisodes: _parseEpisodeNumber(lastEpNum),
+            totalEpisodes: _parseEpisodeNumber(show?.episodeCount || 0),
+            userAction: lastEpNum ? "play" : null
+        }).status
         if (!providerRefs.metadata)
             providerRefs.metadata = { provider: _showMetadataProviderId(show), id: _showMetadataId(show) }
         if (!providerRefs.stream && providerRefs.metadata.provider === _showStreamProviderId(show))
@@ -976,6 +1048,7 @@ Item {
             lastWatchedEpNum: lastEpNum ? String(lastEpNum) : "",
             watchedEpisodes:  [],
             episodeProgress:  {},
+            listStatus: initialStatus,
             updatedAt: Date.now()
         })
     }
@@ -983,7 +1056,7 @@ Item {
     function addToLibrary(show) {
         if (isInLibrary(show.id)) return
         var updated = libraryList.slice()
-        updated.push(_makeEntry(show, "", ""))
+        updated.push(_makeEntry(show, "", "", "plan_to_watch"))
         libraryList = updated
         _saveLibrary()
     }
@@ -994,7 +1067,7 @@ Item {
             return
         }
         var updated = libraryList.slice()
-        updated.push(_makeEntry(show, epId, epNum))
+        updated.push(_makeEntry(show, epId, epNum, "watching"))
         libraryList = updated
         _saveLibrary()
     }
@@ -1007,11 +1080,11 @@ Item {
     function updateLastWatched(showId, epId, epNum) {
         var updated = libraryList.map(function(e) {
             if (e.id !== showId) return e
-            return _mergeLibraryEntry(e, {
+            return _mergeProgressDrivenLibraryEntry(e, {
                 lastWatchedEpId:  String(epId),
                 lastWatchedEpNum: String(epNum),
                 updatedAt: Date.now()
-            })
+            }, "play")
         })
         libraryList = updated
         _saveLibrary()
@@ -1025,11 +1098,11 @@ Item {
             // Clear progress since it's fully watched
             var prog = Object.assign({}, e.episodeProgress || {})
             delete prog[String(epNum)]
-            return _mergeLibraryEntry(e, {
+            return _mergeProgressDrivenLibraryEntry(e, {
                 watchedEpisodes:  watched,
                 episodeProgress:  prog,
                 updatedAt: Date.now()
-            })
+            }, "play")
         })
         libraryList = updated
         _saveLibrary()
@@ -1041,7 +1114,7 @@ Item {
             var watched = (e.watchedEpisodes || []).filter(function(item) {
                 return item !== String(epNum)
             })
-            return _mergeLibraryEntry(e, {
+            return _mergeProgressDrivenLibraryEntry(e, {
                 lastWatchedEpId: e.lastWatchedEpNum === String(epNum) ? "" : e.lastWatchedEpId,
                 lastWatchedEpNum: e.lastWatchedEpNum === String(epNum) ? "" : e.lastWatchedEpNum,
                 watchedEpisodes: watched,
@@ -1087,7 +1160,7 @@ Item {
         var updated = libraryList.slice()
         var existingIndex = updated.findIndex(function(entry) { return entry.id === show.id })
         if (existingIndex === -1) {
-            updated.push(_makeEntry(show, epId, epNum))
+            updated.push(_makeEntry(show, epId, epNum, "watching"))
             existingIndex = updated.length - 1
         }
 
@@ -1115,13 +1188,13 @@ Item {
             delete prog[number]
         })
 
-        updated[existingIndex] = _mergeLibraryEntry(current, {
+        updated[existingIndex] = _mergeProgressDrivenLibraryEntry(current, {
             lastWatchedEpId: String(epId || ""),
             lastWatchedEpNum: String(epNum || ""),
             watchedEpisodes: mergedWatched,
             episodeProgress: prog,
             updatedAt: Date.now()
-        })
+        }, "play")
 
         libraryList = updated
         _saveLibrary()
@@ -1223,10 +1296,10 @@ Item {
                 position: position,
                 duration: duration || 0
             }
-            return _mergeLibraryEntry(e, {
+            return _mergeProgressDrivenLibraryEntry(e, {
                 episodeProgress:  prog,
                 updatedAt: Date.now()
-            })
+            }, "play")
         })
         libraryList = updated
         _saveLibrary()
