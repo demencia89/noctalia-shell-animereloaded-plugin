@@ -2,8 +2,10 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Services.System
 import qs.Services.UI
 import "MalStatus.js" as MalStatus
+import "js/providers.js" as Providers
 
 Item {
     id: root
@@ -27,6 +29,8 @@ Item {
     }
     readonly property string runtimeRoot:
         pluginApi?.manifest?.metadata?.runtimeRoot ?? ""
+    readonly property string defaultAniListRedirectUri:
+        "https://anilist.co/api/v2/oauth/pin"
     readonly property int librarySchemaVersion: 2
 
     function _pathJoin(base, child) {
@@ -43,20 +47,10 @@ Item {
         return _pathJoin(_pathJoin(pluginApi?.pluginDir ?? "", runtimeRoot), relativePath)
     }
 
-    readonly property string scriptPath:
-        _runtimePath("provider_cli.py")
     readonly property string luaPath:
         _runtimePath("progress.lua")
     readonly property string progressDir:
         _pathJoin(pluginApi?.pluginDir ?? "", "progress")
-    readonly property string feedLibraryPath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-library.json")
-    readonly property string feedCachePath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-feed-cache.json")
-    readonly property string providerMappingPath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-provider-map.json")
-    readonly property string malConfigPath:
-        _pathJoin(pluginApi?.pluginDir ?? "", "anime-reloaded-mal-config.json")
 
     // ── Settings ──────────────────────────────────────────────────────────────
     property string currentMode:
@@ -79,9 +73,12 @@ Item {
         pluginApi?.manifest?.metadata?.defaultSettings?.streamProvider ||
         pluginApi?.manifest?.metadata?.providers?.stream?.default ||
         "allanime"
+    property var    aniListSync: _normaliseAniListSync(pluginApi?.pluginSettings?.aniListSync)
     property var    malSync: _normaliseMalSync(pluginApi?.pluginSettings?.malSync)
     property var    browseCache: ({})
     property var    detailCache: ({})
+    property bool   panelSettingsOpen: false
+    property string aniListAuthDraft: ""
 
     function _preferredPanelScreen() {
         if (pluginApi?.panelOpenScreen)
@@ -311,6 +308,22 @@ Item {
         }
     }
 
+    function _emptyAniListSync() {
+        return {
+            version: 1,
+            enabled: false,
+            autoPush: false,
+            clientId: "",
+            redirectUri: defaultAniListRedirectUri,
+            accessToken: "",
+            userId: 0,
+            userName: "",
+            userPicture: "",
+            lastSyncAt: 0,
+            lastSyncDirection: ""
+        }
+    }
+
     function _emptyMalSync() {
         return {
             version: 2,
@@ -324,6 +337,24 @@ Item {
             lastSyncAt: 0,
             lastSyncDirection: ""
         }
+    }
+
+    function _normaliseAniListSync(raw) {
+        var source = _deepClone(raw)
+        if (!source || typeof source !== "object" || Array.isArray(source))
+            source = ({})
+        var config = _emptyAniListSync()
+        config.enabled = source.enabled === true
+        config.autoPush = source.autoPush === true
+        config.clientId = String(source.clientId || "").trim()
+        config.redirectUri = defaultAniListRedirectUri
+        config.accessToken = String(source.accessToken || "").trim()
+        config.userId = Number(source.userId || 0)
+        config.userName = String(source.userName || "")
+        config.userPicture = String(source.userPicture || "")
+        config.lastSyncAt = Number(source.lastSyncAt || 0)
+        config.lastSyncDirection = String(source.lastSyncDirection || "")
+        return config
     }
 
     function _normaliseMalSync(raw) {
@@ -366,10 +397,28 @@ Item {
         pluginApi.saveSettings()
     }
 
+    function _saveAniListSyncSettings() {
+        if (!pluginApi) return
+        pluginApi.pluginSettings.aniListSync = _deepClone(aniListSync)
+        pluginApi.saveSettings()
+    }
+
     function _saveMalSyncSettings() {
         if (!pluginApi) return
         pluginApi.pluginSettings.malSync = _deepClone(malSync)
         pluginApi.saveSettings()
+    }
+
+    function setAniListSyncField(key, value) {
+        var next = _normaliseAniListSync(aniListSync)
+        next[key] = value
+        aniListSync = _normaliseAniListSync(next)
+        _saveAniListSyncSettings()
+    }
+
+    function updateAniListSyncConfig(config) {
+        aniListSync = _normaliseAniListSync(config)
+        _saveAniListSyncSettings()
     }
 
     function setMalSyncField(key, value) {
@@ -382,6 +431,26 @@ Item {
     function updateMalSyncConfig(config) {
         malSync = _normaliseMalSync(config)
         _saveMalSyncSettings()
+    }
+
+    function clearAniListSyncSession() {
+        aniListAutoPushTimer.stop()
+        var next = _normaliseAniListSync(aniListSync)
+        next.enabled = false
+        next.accessToken = ""
+        next.userId = 0
+        next.userName = ""
+        next.userPicture = ""
+        next.lastSyncAt = 0
+        next.lastSyncDirection = ""
+        updateAniListSyncConfig(next)
+        aniListSyncError = ""
+        aniListSyncMessage = "Disconnected from AniList."
+        aniListSyncSummary = ({})
+        aniListSyncResults = []
+        aniListAuthDraft = ""
+        _pendingAniListCommand = ""
+        _pendingAniListBrowserAuth = false
     }
 
     function clearMalSyncSession() {
@@ -448,6 +517,172 @@ Item {
         }
 
         return "MyAnimeList sync completed." + suffix
+    }
+
+    function _formatAniListSyncMessage(direction, summary) {
+        var info = summary || ({})
+        var updated = Number(info.updated || 0)
+        var imported = Number(info.imported || 0)
+        var removed = Number(info.removed || 0)
+        var skipped = Number(info.skipped || 0)
+        var failed = Number(info.failed || 0)
+        var suffix = ""
+        if (skipped > 0 || failed > 0) {
+            var parts = []
+            if (skipped > 0)
+                parts.push(String(skipped) + " skipped")
+            if (failed > 0)
+                parts.push(String(failed) + " failed")
+            suffix = " " + parts.join(", ") + "."
+        }
+
+        if (direction === "push") {
+            if (updated <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            return "Pushed " + _entryCountLabel(updated) + " to AniList." + suffix
+        }
+
+        if (direction === "pull") {
+            if (updated <= 0 && imported <= 0 && failed <= 0)
+                return "AniList is already in sync." + suffix
+            if (updated > 0 && imported > 0)
+                return "Pulled " + _entryCountLabel(updated) + " and imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            if (imported > 0)
+                return "Imported " + _entryCountLabel(imported) + " from AniList." + suffix
+            return "Pulled " + _entryCountLabel(updated) + " from AniList." + suffix
+        }
+
+        if (direction === "delete") {
+            if (removed <= 0 && failed <= 0)
+                return "AniList entry was not removed." + suffix
+            return "Removed " + _entryCountLabel(removed) + " from AniList." + suffix
+        }
+
+        return "AniList sync completed." + suffix
+    }
+
+    function _syncNotificationCommandLabel(command) {
+        var key = String(command || "").trim().toLowerCase()
+        if (key === "push")
+            return "Push"
+        if (key === "pull")
+            return "Pull"
+        if (key === "delete-entry" || key === "delete")
+            return "Removal"
+        if (key === "connect-token")
+            return "Connection"
+        if (key === "refresh")
+            return "Refresh"
+        if (key === "auth-url")
+            return "Login"
+        return "Sync"
+    }
+
+    function _syncNotificationFactLines(summary) {
+        var info = summary || ({})
+        var counts = [
+            { label: "Updated", value: Number(info.updated || 0) },
+            { label: "Imported", value: Number(info.imported || 0) },
+            { label: "Removed", value: Number(info.removed || 0) },
+            { label: "Skipped", value: Number(info.skipped || 0) },
+            { label: "Failed", value: Number(info.failed || 0) }
+        ]
+        var lines = []
+        for (var i = 0; i < counts.length; i++) {
+            var item = counts[i]
+            if (item.value > 0)
+                lines.push(item.label + ": " + String(item.value))
+        }
+        return lines
+    }
+
+    function _syncNotificationResultLine(result) {
+        var item = result || ({})
+        var title = String(item.title || item.id || "Untitled")
+        var reason = String(item.reason || "").trim()
+        var status = String(item.status || "").trim().toLowerCase()
+        if (reason.length > 0)
+            return title + ": " + reason
+        if (status === "updated")
+            return title + ": synced successfully."
+        if (status === "imported")
+            return title + ": imported into the local library."
+        if (status === "removed")
+            return title + ": removed successfully."
+        if (status === "unchanged")
+            return title + ": already aligned."
+        return title
+    }
+
+    function _syncNotificationBody(message, summary, results) {
+        var lines = []
+        var text = String(message || "").trim()
+        var factLines = _syncNotificationFactLines(summary)
+        var issues = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "error" || status === "skipped"
+        }).slice(0, 5)
+        var successes = (results || []).filter(function(item) {
+            var status = String((item || {}).status || "").trim().toLowerCase()
+            return status === "updated" || status === "imported" || status === "removed"
+        }).slice(0, 3)
+
+        if (text.length > 0)
+            lines.push(text)
+        if (factLines.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines = lines.concat(factLines)
+        }
+        if (issues.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Issues:")
+            for (var i = 0; i < issues.length; i++)
+                lines.push("- " + _syncNotificationResultLine(issues[i]))
+        } else if (successes.length > 0) {
+            if (lines.length > 0)
+                lines.push("")
+            lines.push("Recent changes:")
+            for (var j = 0; j < successes.length; j++)
+                lines.push("- " + _syncNotificationResultLine(successes[j]))
+        }
+
+        return lines.join("\n")
+    }
+
+    function _logSyncNotification(serviceName, command, message, summary, results, isError) {
+        var title = String(serviceName || "Sync") + " " + _syncNotificationCommandLabel(command)
+        var body = _syncNotificationBody(message, summary, results)
+        if (body.length === 0)
+            body = title
+        NotificationService.addToHistory({
+            id: "anime-reloaded-sync-" + String(Date.now()) + "-" + String(Math.random()).slice(2, 8),
+            summary: title,
+            summaryMarkdown: title,
+            body: body,
+            bodyMarkdown: body,
+            appName: "AnimeReloaded",
+            urgency: isError === true ? 2 : 1,
+            expireTimeout: 0,
+            timestamp: new Date(),
+            originalImage: "",
+            cachedImage: "",
+            actionsJson: "[]",
+            originalId: 0
+        })
+    }
+
+    function _showSyncFeedback(serviceName, command, message, summary, results, showToast, isError) {
+        if (!showToast)
+            return
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || ""),
+            "device-tv",
+            isError === true ? 4200 : 3200
+        )
+        _logSyncNotification(serviceName, command, message, summary, results, isError)
     }
 
     function _feedMediaId(item) {
@@ -591,6 +826,17 @@ Item {
 
     function _showMetadataId(show) {
         return String(show?.providerRefs?.metadata?.id || show?.id || "")
+    }
+
+    function _showAniListMediaId(show) {
+        var metadataProvider = String(show?.providerRefs?.metadata?.provider || "")
+        var metadataId = String(show?.providerRefs?.metadata?.id || "")
+        if (metadataProvider === "anilist" && /^\d+$/.test(metadataId))
+            return metadataId
+        var showId = String(show?.id || "")
+        if (/^\d+$/.test(showId))
+            return showId
+        return ""
     }
 
     function _showStreamProviderId(show) {
@@ -842,22 +1088,6 @@ Item {
         }
     }
 
-    function _metadataCommand(command, args, providerId) {
-        return ["python3", scriptPath, "metadata", providerId || metadataProviderId, command].concat(args || [])
-    }
-
-    function _showMetadataCommand(show, command, args) {
-        return _metadataCommand(command, args, _showMetadataProviderId(show))
-    }
-
-    function _streamCommand(show, epNum) {
-        return [
-            "python3", scriptPath, "stream", _showStreamProviderId(show), "resolve",
-            _showMetadataId(show), String(epNum || ""), currentMode,
-            preferredProvider, "best", providerMappingPath, _showMetadataProviderId(show)
-        ]
-    }
-
     function _formatPlaybackError(stderrTail) {
         var text = String(stderrTail || "").trim()
         if (!text)
@@ -952,6 +1182,17 @@ Item {
     property var    feedNotificationState: _emptyFeedNotificationState()
     property bool   _pendingStartupFeedToast: false
 
+    // ── AniList sync state ───────────────────────────────────────────────────
+    property bool   isAniListSyncBusy: false
+    property string aniListSyncError: ""
+    property string aniListSyncMessage: ""
+    property var    aniListSyncSummary: ({})
+    property var    aniListSyncResults: []
+    property string _pendingAniListCommand: ""
+    property bool   _pendingAniListShowsToast: true
+    property bool   _suppressAniListAutoPush: false
+    property bool   _pendingAniListBrowserAuth: false
+
     // ── MyAnimeList sync state ───────────────────────────────────────────────
     property bool   isMalSyncBusy: false
     property string malSyncError: ""
@@ -1016,6 +1257,10 @@ Item {
         posterSize = _normalisePosterSize(panelSize, posterSize)
         if (pluginApi && pluginApi.pluginSettings)
             pluginApi.pluginSettings.posterSize = posterSize
+        // Init crypto cache dir, eagerly load forge, persist to disk if CDN was used
+        Providers.initCryptoCache((pluginApi ? pluginApi.pluginDir : "") + "/js/")
+        Providers.ensureCryptoLoaded()
+        _writeForgeCache()
         _migrateLibrarySchemaIfNeeded()
         _loadLibrary()
         _loadFeedNotificationState()
@@ -1036,6 +1281,13 @@ Item {
     }
 
     Timer {
+        id: aniListAutoPushTimer
+        interval: 1800
+        repeat: false
+        onTriggered: root.pushAniListSync(false)
+    }
+
+    Timer {
         id: malAutoPushTimer
         interval: 1800
         repeat: false
@@ -1048,9 +1300,21 @@ Item {
         mkdirProc.running = true
     }
 
+    function _aniListSyncReady() {
+        return aniListSync?.enabled === true
+            && String(aniListSync?.accessToken || "").length > 0
+    }
+
     function _malSyncReady() {
         return String(malSync?.backendSessionToken || "").length > 0
             && String(malSync?.userName || "").length > 0
+    }
+
+    function _queueAniListAutoPush() {
+        if (_suppressAniListAutoPush) return
+        if (!(aniListSync?.autoPush === true) || !_aniListSyncReady())
+            return
+        aniListAutoPushTimer.restart()
     }
 
     function _queueMalAutoPush() {
@@ -1121,8 +1385,10 @@ Item {
         pluginApi.saveSettings()
         feedLastFetchedAt = 0
         libraryVersion++  // trigger reactive re-evaluation in views
-        if (skipAutoSync !== true)
+        if (skipAutoSync !== true) {
+            _queueAniListAutoPush()
             _queueMalAutoPush()
+        }
     }
 
     function _loadLibrary() {
@@ -1810,346 +2076,234 @@ Item {
     Process { id: mkdirProc }
     Process { id: rmProc }
 
+    // Writes forge cache to disk after CDN download
     Process {
-        id: feedWriteProc
-        property string _payload: ""
-        property bool _force: false
-
+        id: forgeCacheWriteProc
         onRunningChanged: {
-            if (running) return
-            root._runFeedCommand(_force)
+            if (!running) {
+                Providers.markForgeCacheWritten()
+                console.log("[Crypto] Forge cache written to disk")
+            }
         }
     }
 
-    Process {
-        id: malWriteProc
-        property string _configPayload: ""
-        property string _libraryPayload: ""
-        property bool _includeLibrary: false
-        property var _nextCommand: []
-
-        onRunningChanged: {
-            if (running) return
-            root._runPreparedMalCommand(_nextCommand)
-        }
+    function _writeForgeCache() {
+        if (!Providers.hasPendingForgeCache()) return
+        var cachePath = (pluginApi ? pluginApi.pluginDir : "") + "/js/forge.cache.js"
+        var cdnUrl = Providers.getForgeCdnUrl()
+        // Download directly via curl — keeps command tiny, no content in Process args
+        forgeCacheWriteProc.command = ["curl", "-sL", "-o", cachePath, cdnUrl]
+        forgeCacheWriteProc.running = true
     }
 
-    Process {
-        id: malBrowserWriteProc
-        property var _nextCommand: []
-        property string _authUrl: ""
-
-        onRunningChanged: {
-            if (running) return
-            root._runPreparedMalBrowserCommand(_nextCommand, _authUrl)
+    // ── AniList sync result handler ──────────────────────────────────────────
+    function _handleAniListSyncResult(command, d) {
+        if (d.config)
+            root.updateAniListSyncConfig(d.config)
+        root.aniListSyncSummary = d.summary || ({})
+        root.aniListSyncResults = Array.isArray(d.results) ? d.results : []
+        if ((command === "pull" || command === "push") && Array.isArray(d.library)) {
+            root._suppressAniListAutoPush = true
+            root.libraryList = d.library.map(function(entry) {
+                return root._normaliseLibraryEntry(entry)
+            })
+            root._saveLibrary(true)
+            root._suppressAniListAutoPush = false
+            if (command === "pull")
+                root.fetchFollowingFeed(true)
         }
+
+        var summary = d.summary || ({})
+        if (command === "auth-url" && d.authUrl) {
+            root.aniListSyncMessage = "Opened AniList authorization in the browser. Paste the returned callback URL or access token to finish."
+            Qt.openUrlExternally(d.authUrl)
+        } else if (command === "connect-token") {
+            root._pendingAniListBrowserAuth = false
+            root.aniListAuthDraft = ""
+            root.aniListSyncMessage = "Connected to AniList as " + String(((d || {}).user || {}).name || root.aniListSync.userName || "your account") + "."
+        } else if (command === "refresh") {
+            root.aniListSyncMessage = "Refreshed AniList session."
+        } else if (command === "delete-entry") {
+            var removedTitle = String((d && d.results && d.results.length > 0 ? d.results[0].title : "") || "")
+            root.aniListSyncMessage = removedTitle.length > 0
+                ? ("Removed " + removedTitle + " from AniList.")
+                : root._formatAniListSyncMessage("delete", summary)
+        } else if (command === "push") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("push", summary)
+        } else if (command === "pull") {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("pull", summary)
+        } else {
+            root.aniListSyncMessage = root._formatAniListSyncMessage("", summary)
+        }
+        root.aniListSyncError = ""
+
+        _showSyncFeedback("AniList", command, root.aniListSyncMessage, summary, root.aniListSyncResults, root._pendingAniListShowsToast, false)
+        root._pendingAniListCommand = ""
     }
 
-    Process {
-        id: malProc
-        property string _buf: ""
+    function _queueAniListCommandJS(command, includeLibrary, extraArgs, showToast) {
+        _pendingAniListCommand = String(command || "")
+        _pendingAniListShowsToast = showToast !== false
+        aniListSyncError = ""
+        aniListSyncMessage = ""
 
-        onRunningChanged: {
-            if (running) return
-            root.isMalSyncBusy = false
-            if (_buf.length === 0) {
-                root.malSyncError = "MyAnimeList command did not return any data."
+        var config = _normaliseAniListSync(aniListSync)
+        var aniListArgs = { config: config }
+
+        if (includeLibrary)
+            aniListArgs.libraryEntries = libraryList || []
+        if (command === "connect-token")
+            aniListArgs.authResult = (extraArgs || [])[0] || ""
+        if (command === "delete-entry") {
+            aniListArgs.mediaId = (extraArgs || [])[0] || ""
+            aniListArgs.title = (extraArgs || [])[1] || ""
+        }
+
+        isAniListSyncBusy = true
+
+        Providers.sync("anilist", command, aniListArgs, function(err, d) {
+            isAniListSyncBusy = false
+            if (err) {
+                root.aniListSyncError = String(err)
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                if (command === "auth-url")
+                    root._pendingAniListBrowserAuth = false
+                return
+            }
+            if (!d) {
+                root.aniListSyncError = "AniList command did not return any data."
+                root.aniListSyncMessage = ""
+                _showSyncFeedback("AniList", command, root.aniListSyncError, {}, [], root._pendingAniListShowsToast, true)
+                root._pendingAniListCommand = ""
+                return
+            }
+            _handleAniListSyncResult(command, d)
+        })
+    }
+
+    // ── MAL sync result handler ──────────────────────────────────────────────
+    function _handleMalSyncResult(command, d) {
+        if (d.config)
+            root.updateMalSyncConfig(d.config)
+        root.malSyncSummary = d.summary || ({})
+        root.malSyncResults = Array.isArray(d.results) ? d.results : []
+        if ((command === "pull" || command === "push") && Array.isArray(d.library)) {
+            root._suppressMalAutoPush = true
+            root.libraryList = d.library.map(function(entry) {
+                return root._normaliseLibraryEntry(entry)
+            })
+            root._saveLibrary(true)
+            root._suppressMalAutoPush = false
+            if (command === "pull")
+                root.fetchFollowingFeed(true)
+        }
+
+        var summary = d.summary || ({})
+        if (command === "auth-url" && d.authUrl) {
+            if (root._pendingMalBrowserAuth) {
+                root.malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
+                root._startMalBrowserListenerJS(d.authUrl)
+            } else {
+                root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
+                Qt.openUrlExternally(d.authUrl)
+            }
+        } else if (command === "refresh") {
+            root.malSyncMessage = "Refreshed MyAnimeList session."
+        } else if (command === "delete-entry") {
+            var removedTitle = String((d && d.results && d.results.length > 0 ? d.results[0].title : "") || "")
+            root.malSyncMessage = removedTitle.length > 0
+                ? ("Removed " + removedTitle + " from MyAnimeList.")
+                : root._formatMalSyncMessage("delete", summary)
+        } else if (command === "push") {
+            root.malSyncMessage = root._formatMalSyncMessage("push", summary)
+        } else if (command === "pull") {
+            root.malSyncMessage = root._formatMalSyncMessage("pull", summary)
+        } else {
+            root.malSyncMessage = root._formatMalSyncMessage("", summary)
+        }
+        root.malSyncError = ""
+
+        _showSyncFeedback("MyAnimeList", command, root.malSyncMessage, summary, root.malSyncResults, root._pendingMalShowsToast, false)
+        root._pendingMalCommand = ""
+    }
+
+    function _queueMalCommandJS(command, includeLibrary, extraArgs, showToast) {
+        _pendingMalCommand = String(command || "")
+        _pendingMalShowsToast = showToast !== false
+        malSyncError = ""
+        malSyncMessage = ""
+
+        var config = _normaliseMalSync(malSync)
+        var malArgs = { config: config }
+
+        if (includeLibrary)
+            malArgs.libraryEntries = libraryList || []
+        if (command === "delete-entry") {
+            malArgs.malId = (extraArgs || [])[0] || ""
+            malArgs.title = (extraArgs || [])[1] || ""
+        }
+        if (command === "listen-exchange")
+            malArgs.timeout = 240
+
+        isMalSyncBusy = true
+
+        Providers.sync("myanimelist", command, malArgs, function(err, d) {
+            isMalSyncBusy = false
+            if (err) {
+                root.malSyncError = String(err)
                 root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
                 root._pendingMalCommand = ""
                 root._pendingMalBrowserAuth = false
                 root._pendingMalBrowserAuthUrl = ""
-                _buf = ""
                 return
             }
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) {
-                    root.malSyncError = d.error
-                    root.malSyncMessage = ""
-                    root._pendingMalBrowserAuth = false
-                    root._pendingMalBrowserAuthUrl = ""
-                    _buf = ""
-                    return
-                }
-                if (d.config)
-                    root.updateMalSyncConfig(d.config)
-                root.malSyncSummary = d.summary || ({})
-                root.malSyncResults = Array.isArray(d.results) ? d.results : []
-                if ((root._pendingMalCommand === "pull" || root._pendingMalCommand === "push") && Array.isArray(d.library)) {
-                    root._suppressMalAutoPush = true
-                    root.libraryList = d.library.map(function(entry) {
-                        return root._normaliseLibraryEntry(entry)
-                    })
-                    root._saveLibrary(true)
-                    root._suppressMalAutoPush = false
-                    if (root._pendingMalCommand === "pull")
-                        root.fetchFollowingFeed(true)
-                }
-
-                var summary = d.summary || ({})
-                if (root._pendingMalCommand === "auth-url" && d.authUrl) {
-                    if (root._pendingMalBrowserAuth) {
-                        root.malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
-                        root._queueMalBrowserListener(d.authUrl)
-                    } else {
-                        root.malSyncMessage = "Opened MyAnimeList authorization in the browser."
-                        Qt.openUrlExternally(d.authUrl)
-                    }
-                } else if (root._pendingMalCommand === "refresh") {
-                    root.malSyncMessage = "Refreshed MyAnimeList session."
-                } else if (root._pendingMalCommand === "delete-entry") {
-                    var removedTitle = String((d?.results && d.results.length > 0 ? d.results[0]?.title : "") || "")
-                    root.malSyncMessage = removedTitle.length > 0
-                        ? ("Removed " + removedTitle + " from MyAnimeList.")
-                        : root._formatMalSyncMessage("delete", summary)
-                } else if (root._pendingMalCommand === "push") {
-                    root.malSyncMessage = root._formatMalSyncMessage("push", summary)
-                } else if (root._pendingMalCommand === "pull") {
-                    root.malSyncMessage = root._formatMalSyncMessage("pull", summary)
-                } else {
-                    root.malSyncMessage = root._formatMalSyncMessage("", summary)
-                }
-                root.malSyncError = ""
-
-                if (root._pendingMalShowsToast) {
-                    ToastService.showNotice(
-                        "AnimeReloaded",
-                        root.malSyncMessage,
-                        "device-tv",
-                        3200
-                    )
-                }
-            } catch(e) {
-                root.malSyncError = "Parse error: " + e
-                root._pendingMalBrowserAuth = false
-                root._pendingMalBrowserAuthUrl = ""
-                Logger.w("AnimeReloaded", "myanimelist sync parse error:", e)
+            if (!d) {
+                root.malSyncError = "MyAnimeList command did not return any data."
+                root.malSyncMessage = ""
+                _showSyncFeedback("MyAnimeList", command, root.malSyncError, {}, [], root._pendingMalShowsToast, true)
+                root._pendingMalCommand = ""
+                return
             }
-            root._pendingMalCommand = ""
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { malProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist:", data)
-            }
-        }
+            _handleMalSyncResult(command, d)
+        })
     }
 
-    Process {
-        id: malBrowserProc
-        property string _buf: ""
+    function _startMalBrowserListenerJS(authUrl) {
+        root._pendingMalBrowserAuthUrl = String(authUrl || "")
+        var config = _normaliseMalSync(malSync)
 
-        onRunningChanged: {
-            if (running) return
-            root.isMalSyncBusy = false
+        isMalSyncBusy = true
+        malSyncError = ""
+        malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
+
+        Providers.sync("myanimelist", "listen-exchange", {
+            config: config,
+            timeout: 240
+        }, function(err, d) {
+            isMalSyncBusy = false
             root._pendingMalBrowserAuth = false
             root._pendingMalBrowserAuthUrl = ""
-            if (_buf.length === 0) {
-                root.malSyncError = "MyAnimeList browser sign-in did not return any data."
+            if (err) {
+                root.malSyncError = String(err)
                 root.malSyncMessage = ""
-                _buf = ""
                 return
             }
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) {
-                    root.malSyncError = d.error
-                    root.malSyncMessage = ""
-                    _buf = ""
-                    return
-                }
-                if (d.config)
-                    root.updateMalSyncConfig(d.config)
-                root.malSyncMessage = "Connected to MyAnimeList as " + String(d?.user?.name || root.malSync?.userName || "your account") + "."
-                root.malSyncError = ""
-                ToastService.showNotice(
-                    "AnimeReloaded",
-                    root.malSyncMessage,
-                    "device-tv",
-                    3200
-                )
-            } catch(e) {
-                root.malSyncError = "Parse error: " + e
-                Logger.w("AnimeReloaded", "myanimelist browser auth parse error:", e)
-            }
-            _buf = ""
-        }
+            if (d.config) root.updateMalSyncConfig(d.config)
+            root.malSyncMessage = "Connected to MyAnimeList as " + String(((d || {}).user || {}).name || root.malSync.userName || "your account") + "."
+            root.malSyncError = ""
+            _showSyncFeedback("MyAnimeList", "connect-token", root.malSyncMessage, {}, [], true, false)
+        })
 
-        stdout: SplitParser {
-            onRead: function(data) { malBrowserProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "myanimelist browser auth:", data)
-            }
-        }
+        Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
     }
 
-    // ── Browse processes ──────────────────────────────────────────────────────
-    Process {
-        id: genreProc
-        property string _buf: ""
-        onRunningChanged: {
-            if (running) return
-            if (_buf.length === 0) return
-            try {
-                root.genresList = root._filterVisibleGenres(JSON.parse(_buf))
-                if (!root._isVisibleGenre(root.currentGenre))
-                    root.currentGenre = ""
-            } catch(e) { Logger.w("AnimeReloaded", "genres parse error:", e) }
-            _buf = ""
-        }
-        stdout: SplitParser {
-            onRead: function(data) { genreProc._buf += data }
-        }
-    }
+    // ── Browse / metadata helpers ──────────────────────────────────────────────
 
-    Process {
-        id: browseProc
-        property string _buf:   ""
-        property bool   _reset: true
-        property string _cacheKey: ""
-
-        onRunningChanged: {
-            if (running) return
-            root.isFetchingAnime = false
-            if (_buf.length === 0) return
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) { root.animeError = d.error; _buf = ""; return }
-                root.browseCache[_cacheKey] = root._deepClone({
-                    results: d.results || [],
-                    hasNextPage: d.hasNextPage || false
-                })
-                var results = d.results || []
-                if (_reset)
-                    root.browseResetToken++
-                root.animeList = _reset ? results : root.animeList.concat(results)
-                root._hasMore = d.hasNextPage || false
-                root._page++
-            } catch(e) { root.animeError = "Parse error: " + e }
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { browseProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "browse:", data)
-            }
-        }
-    }
-
-    Process {
-        id: detailProc
-        property string _buf:  ""
-        property var    _show: null
-        property string _cacheKey: ""
-
-        onRunningChanged: {
-            if (running) return
-            root.isFetchingDetail = false
-            if (_buf.length === 0) return
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) { root.detailError = d.error; _buf = ""; return }
-                if (_show) {
-                    var preserveLocalId = String(_show?.providerRefs?.metadata?.id || "") !== String(_show?.id || "")
-                    var enriched = Object.assign({}, _show, d)
-                    if (preserveLocalId)
-                        enriched.id = _show.id
-                    enriched.episodes = root._normaliseEpisodeList(d.episodes || [])
-                    if (d.providerRefs)
-                        enriched.providerRefs = root._deepClone(d.providerRefs)
-                    root.detailError = d.mappingError || ""
-                    root.detailCache[_cacheKey] = root._deepClone(enriched)
-                    root.currentAnime = enriched
-                    root._maybeAutoPlayPendingShow(enriched)
-                }
-            } catch(e) {
-                root.detailError = "Parse error: " + e
-                Logger.w("AnimeReloaded", "detail error:", e)
-            }
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { detailProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "detail:", data)
-            }
-        }
-    }
-
-    Process {
-        id: feedProc
-        property string _buf: ""
-
-        onRunningChanged: {
-            if (running) return
-            root.isFetchingFeed = false
-            if (_buf.length === 0) return
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) {
-                    root.feedError = d.error
-                    _buf = ""
-                    return
-                }
-                root._applyFeedPayload(d)
-            } catch(e) {
-                root.feedError = "Parse error: " + e
-                Logger.w("AnimeReloaded", "feed error:", e)
-            }
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { feedProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "feed:", data)
-            }
-        }
-    }
-
-    Process {
-        id: streamProc
-        property string _buf: ""
-
-        onRunningChanged: {
-            if (running) return
-            root.isFetchingLinks = false
-            if (_buf.length === 0) return
-            try {
-                var d = JSON.parse(_buf)
-                if (d.error) { root.linksError = d.error; _buf = ""; return }
-                root.selectedLink = d
-            } catch(e) { root.linksError = "Parse error: " + e }
-            _buf = ""
-        }
-
-        stdout: SplitParser {
-            onRead: function(data) { streamProc._buf += data }
-        }
-        stderr: SplitParser {
-            onRead: function(data) {
-                if (data.trim().length > 0) Logger.w("AnimeReloaded", "stream:", data)
-            }
-        }
-    }
-
-    // ── Internal browse helper ────────────────────────────────────────────────
-    function _runBrowse(commandArgs, reset) {
-        var cacheKey = _browseCacheKey(commandArgs)
+    function _runBrowseJS(providerId, command, args, reset) {
+        var cacheKey = [providerId, command, JSON.stringify(args)].join("\u241f")
         if (browseCache[cacheKey]) {
             var cached = _deepClone(browseCache[cacheKey])
             animeError = ""
@@ -2161,117 +2315,86 @@ Item {
             _page++
             return
         }
-        browseProc._buf   = ""
-        browseProc._reset = reset
-        browseProc._cacheKey = cacheKey
-        browseProc.command = commandArgs
         isFetchingAnime = true
         animeError = ""
-        if (browseProc.running) {
-            browseProc.running = false
-            Qt.callLater(function() { browseProc.running = true })
-        } else {
-            browseProc.running = true
-        }
-    }
-
-    function _syncCommand(command, args) {
-        return ["python3", scriptPath, "sync", "myanimelist", command, malConfigPath].concat(args || [])
-    }
-
-    function _runPreparedMalCommand(commandArgs) {
-        malProc._buf = ""
-        malProc.command = commandArgs
-        isMalSyncBusy = true
-        malSyncError = ""
-        if (malProc.running) {
-            malProc.running = false
-            Qt.callLater(function() { malProc.running = true })
-        } else {
-            malProc.running = true
-        }
-    }
-
-    function _runPreparedMalBrowserCommand(commandArgs, authUrl) {
-        malBrowserProc._buf = ""
-        malBrowserProc.command = commandArgs
-        isMalSyncBusy = true
-        malSyncError = ""
-        malSyncMessage = "Waiting for MyAnimeList authorization in the browser."
-        if (malBrowserProc.running) {
-            malBrowserProc.running = false
-            Qt.callLater(function() {
-                malBrowserProc.running = true
-                Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
-            })
-        } else {
-            malBrowserProc.running = true
-            Qt.callLater(function() { Qt.openUrlExternally(authUrl) })
-        }
-    }
-
-    function _queueMalCommand(command, includeLibrary, extraArgs, showToast) {
-        _pendingMalCommand = String(command || "")
-        _pendingMalShowsToast = showToast !== false
-        malSyncError = ""
-        malSyncMessage = ""
-
-        var configPayload = JSON.stringify(_normaliseMalSync(malSync))
-        var libraryPayload = JSON.stringify(libraryList || [])
-        malWriteProc._configPayload = configPayload
-        malWriteProc._libraryPayload = libraryPayload
-        malWriteProc._includeLibrary = includeLibrary === true
-        malWriteProc._nextCommand = _syncCommand(command, (includeLibrary ? [feedLibraryPath] : []).concat(extraArgs || []))
-        malWriteProc.command = includeLibrary
-            ? [
-                "sh", "-c",
-                "printf '%s' \"$1\" > \"$2\"\nprintf '%s' \"$3\" > \"$4\"",
-                "sh",
-                configPayload,
-                malConfigPath,
-                libraryPayload,
-                feedLibraryPath
-            ]
-            : [
-                "sh", "-c",
-                "printf '%s' \"$1\" > \"$2\"",
-                "sh",
-                configPayload,
-                malConfigPath
-            ]
-
-        isMalSyncBusy = true
-        if (malWriteProc.running) {
-            malWriteProc.running = false
-            Qt.callLater(function() { malWriteProc.running = true })
-        } else {
-            malWriteProc.running = true
-        }
-    }
-
-    function _queueMalBrowserListener(authUrl) {
-        _pendingMalBrowserAuthUrl = String(authUrl || "")
-        var configPayload = JSON.stringify(_normaliseMalSync(malSync))
-        malBrowserWriteProc._authUrl = _pendingMalBrowserAuthUrl
-        malBrowserWriteProc._nextCommand = _syncCommand("listen-exchange", [])
-        malBrowserWriteProc.command = [
-            "sh", "-c",
-            "printf '%s' \"$1\" > \"$2\"",
-            "sh",
-            configPayload,
-            malConfigPath
-        ]
-
-        isMalSyncBusy = true
-        if (malBrowserWriteProc.running) {
-            malBrowserWriteProc.running = false
-            Qt.callLater(function() { malBrowserWriteProc.running = true })
-        } else {
-            malBrowserWriteProc.running = true
-        }
+        Providers.metadata(providerId, command, args, function(err, d) {
+            isFetchingAnime = false
+            if (err) { animeError = err; return }
+            if (!d) return
+            browseCache[cacheKey] = _deepClone({ results: d.results || [], hasNextPage: d.hasNextPage || false })
+            var results = d.results || []
+            if (reset)
+                browseResetToken++
+            animeList = reset ? results : animeList.concat(results)
+            _hasMore = d.hasNextPage || false
+            _page++
+        })
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
+    function startAniListBrowserAuth() {
+        if (String(aniListSync?.clientId || "").trim().length === 0) {
+            aniListSyncError = "Enter your AniList client id before starting browser login."
+            return
+        }
+        _pendingAniListBrowserAuth = true
+        aniListSyncError = ""
+        aniListSyncMessage = "Opening AniList sign-in..."
+        _queueAniListCommandJS("auth-url", false, [], false)
+    }
+
+    function completeAniListBrowserAuth(authResult, showToast) {
+        if (String(authResult || "").trim().length === 0) {
+            aniListSyncError = "Paste the AniList callback URL or access token first."
+            return
+        }
+        aniListSyncError = ""
+        aniListSyncMessage = "Finishing AniList sign-in..."
+        _queueAniListCommandJS("connect-token", false, [authResult], showToast !== false)
+    }
+
+    function refreshAniListSyncSession(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect an AniList account before refreshing."
+            return
+        }
+        _queueAniListCommandJS("refresh", false, [], showToast !== false)
+    }
+
+    function pushAniListSync(showToast) {
+        if ((libraryList || []).length === 0) {
+            aniListSyncError = "Your library is empty."
+            return
+        }
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pushing library progress."
+            return
+        }
+        _queueAniListCommandJS("push", true, [], showToast !== false)
+    }
+
+    function pullAniListSync(showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before pulling progress."
+            return
+        }
+        _queueAniListCommandJS("pull", true, [], showToast !== false)
+    }
+
+    function removeShowFromAniList(show, showToast) {
+        if (!_aniListSyncReady()) {
+            aniListSyncError = "Connect AniList before removing titles from your AniList list."
+            return
+        }
+        var mediaId = _showAniListMediaId(show)
+        if (mediaId.length === 0) {
+            aniListSyncError = "No AniList media id is available for this title."
+            return
+        }
+        var title = String(show?.englishName || show?.name || "")
+        _queueAniListCommandJS("delete-entry", false, [mediaId, title], showToast !== false)
+    }
+
     function startMalBrowserAuth() {
         if (String(malSync?.backendUrl || "").trim().length === 0) {
             malSyncError = "The MyAnimeList backend URL is not configured."
@@ -2280,7 +2403,7 @@ Item {
         _pendingMalBrowserAuth = true
         malSyncError = ""
         malSyncMessage = "Preparing MyAnimeList sign-in..."
-        _queueMalCommand("auth-url", false, [], false)
+        _queueMalCommandJS("auth-url", false, [], false)
     }
 
     function refreshMalSyncSession(showToast) {
@@ -2288,7 +2411,7 @@ Item {
             malSyncError = "Connect a MyAnimeList account before refreshing."
             return
         }
-        _queueMalCommand("refresh", false, [], showToast !== false)
+        _queueMalCommandJS("refresh", false, [], showToast !== false)
     }
 
     function pushMalSync(showToast) {
@@ -2300,7 +2423,7 @@ Item {
             malSyncError = "Connect MyAnimeList before pushing library progress."
             return
         }
-        _queueMalCommand("push", true, [], showToast !== false)
+        _queueMalCommandJS("push", true, [], showToast !== false)
     }
 
     function pullMalSync(showToast) {
@@ -2308,7 +2431,7 @@ Item {
             malSyncError = "Connect MyAnimeList before pulling progress."
             return
         }
-        _queueMalCommand("pull", true, [], showToast !== false)
+        _queueMalCommandJS("pull", true, [], showToast !== false)
     }
 
     function removeShowFromMal(show, showToast) {
@@ -2322,35 +2445,33 @@ Item {
             return
         }
         var title = String(show?.englishName || show?.name || "")
-        _queueMalCommand("delete-entry", false, [malId, title], showToast !== false)
+        _queueMalCommandJS("delete-entry", false, [malId, title], showToast !== false)
     }
 
     function fetchGenres() {
         if (genresList.length > 0) return
-        genreProc._buf = ""
-        genreProc.command = _metadataCommand("genres")
-        genreProc.running = true
+        Providers.metadata(metadataProviderId, "genres", {}, function(err, data) {
+            if (err) { Logger.w("AnimeReloaded", "genres error:", err); return }
+            root.genresList = root._filterVisibleGenres(data || [])
+            if (!root._isVisibleGenre(root.currentGenre))
+                root.currentGenre = ""
+        })
     }
 
     function _runFeedCommand(forceRefresh) {
-        feedProc._buf = ""
-        feedProc.command = _metadataCommand("feed", [
-            feedLibraryPath,
-            currentMode,
-            feedCachePath,
-            providerMappingPath,
-            streamProviderId
-        ])
         isFetchingFeed = true
         feedError = ""
-        if (forceRefresh === true)
-            feedLastFetchedAt = 0
-        if (feedProc.running) {
-            feedProc.running = false
-            Qt.callLater(function() { feedProc.running = true })
-        } else {
-            feedProc.running = true
-        }
+        if (forceRefresh === true) feedLastFetchedAt = 0
+        Providers.metadata(metadataProviderId, "feed", {
+            libraryEntries: libraryList || [],
+            mode: currentMode,
+            streamProvider: streamProviderId
+        }, function(err, d) {
+            isFetchingFeed = false
+            if (err) { feedError = err; return }
+            if (!d) return
+            _applyFeedPayload(d)
+        })
     }
 
     function fetchFollowingFeed(forceRefresh) {
@@ -2367,22 +2488,7 @@ Item {
         var now = Date.now()
         if (!forceRefresh && feedList.length > 0 && (now - feedLastFetchedAt) < feedCooldownMs)
             return
-
-        feedWriteProc._payload = JSON.stringify(libraryList || [])
-        feedWriteProc._force = forceRefresh === true
-        feedWriteProc.command = [
-            "sh", "-c",
-            "printf '%s' \"$1\" > \"$2\"",
-            "sh",
-            feedWriteProc._payload,
-            feedLibraryPath
-        ]
-        if (feedWriteProc.running) {
-            feedWriteProc.running = false
-            Qt.callLater(function() { feedWriteProc.running = true })
-        } else {
-            feedWriteProc.running = true
-        }
+        _runFeedCommand(forceRefresh)
     }
 
     function markFeedNotificationsSeen() {
@@ -2430,13 +2536,12 @@ Item {
         browseFeed = "top"
         currentView = "top"
         currentSearchQuery = ""
-        _runBrowse(_metadataCommand("popular", [
-            String(_page),
-            currentMode,
-            currentGenre || "",
-            providerMappingPath,
-            streamProviderId
-        ]), reset || _page === 1)
+        _runBrowseJS(metadataProviderId, "popular", {
+            page: _page,
+            mode: currentMode,
+            genre: currentGenre || null,
+            streamProvider: streamProviderId
+        }, reset || _page === 1)
     }
 
     function fetchRecent(reset) {
@@ -2445,13 +2550,12 @@ Item {
         browseFeed = "recent"
         currentView = "recent"
         currentSearchQuery = ""
-        _runBrowse(_metadataCommand("recent", [
-            String(_page),
-            currentMode,
-            currentCountry,
-            providerMappingPath,
-            streamProviderId
-        ]), reset || _page === 1)
+        _runBrowseJS(metadataProviderId, "recent", {
+            page: _page,
+            mode: currentMode,
+            country: currentCountry,
+            streamProvider: streamProviderId
+        }, reset || _page === 1)
     }
 
     function fetchNextPage() {
@@ -2468,14 +2572,13 @@ Item {
         if (isFetchingAnime) return
         currentView = "search"
         currentSearchQuery = query
-        _runBrowse(_metadataCommand("search", [
-            query,
-            currentMode,
-            String(_page),
-            currentGenre || "",
-            providerMappingPath,
-            streamProviderId
-        ]), reset || _page === 1)
+        _runBrowseJS(metadataProviderId, "search", {
+            query: query,
+            mode: currentMode,
+            page: _page,
+            genre: currentGenre || null,
+            streamProvider: streamProviderId
+        }, reset || _page === 1)
     }
 
     function fetchAnimeDetail(show) {
@@ -2519,32 +2622,37 @@ Item {
             currentAnime = Object.assign({}, show, cachedDetail)
             isFetchingDetail = false
             _maybeAutoPlayPendingShow(currentAnime)
-            if (detailProc.running) detailProc.running = false
             return
         }
-        detailProc._buf  = ""
-        detailProc._show = show
-        detailProc._cacheKey = cacheKey
-        detailProc.command = _showMetadataCommand(show, "episodes", [
-            _showMetadataId(show),
-            currentMode,
-            providerMappingPath,
-            _showStreamProviderId(show)
-        ])
         isFetchingDetail = true
-        if (detailProc.running) {
-            detailProc.running = false
-            Qt.callLater(function() { detailProc.running = true })
-        } else {
-            detailProc.running = true
-        }
+        var showProviderId = _showMetadataProviderId(show)
+        var showStreamProvider = _showStreamProviderId(show)
+        Providers.metadata(showProviderId, "episodes", {
+            showId: _showMetadataId(show),
+            mode: currentMode,
+            streamProvider: showStreamProvider
+        }, function(err, d) {
+            isFetchingDetail = false
+            if (err) { detailError = err; return }
+            if (!d) return
+            if (show) {
+                var preserveLocalId = String(((show.providerRefs || {}).metadata || {}).id || "") !== String(show.id || "")
+                var enriched = Object.assign({}, show, d)
+                if (preserveLocalId) enriched.id = show.id
+                enriched.episodes = _normaliseEpisodeList(d.episodes || [])
+                if (d.providerRefs) enriched.providerRefs = _deepClone(d.providerRefs)
+                detailError = d.mappingError || ""
+                detailCache[cacheKey] = _deepClone(enriched)
+                currentAnime = enriched
+                _maybeAutoPlayPendingShow(enriched)
+            }
+        })
     }
 
     function clearDetail() {
         currentAnime = null
         detailFocusEpisodeNum = ""
         pendingAutoPlayShowId = ""
-        if (detailProc.running) detailProc.running = false
     }
 
     function fetchStreamLinks(showId, epId, epNum) {
@@ -2554,17 +2662,24 @@ Item {
         _pendingEpisodeId = String(epId || "")
         currentEpisode  = String(epNum)
         linksError      = ""
-        playbackError  = ""
+        playbackError   = ""
         selectedLink    = null
         isFetchingLinks = true
-        streamProc._buf  = ""
-        streamProc.command = _streamCommand(currentAnime, epNum)
-        if (streamProc.running) {
-            streamProc.running = false
-            Qt.callLater(function() { streamProc.running = true })
-        } else {
-            streamProc.running = true
-        }
+        var showStreamProvider = _showStreamProviderId(currentAnime)
+        Providers.stream(showStreamProvider, "resolve", {
+            showId: _showMetadataId(currentAnime),
+            episodeNumber: String(epNum || ""),
+            mode: currentMode,
+            mirrorPref: preferredProvider,
+            qualityPref: "best",
+            title: _showTitle(currentAnime),
+            metadataProviderId: _showMetadataProviderId(currentAnime)
+        }, function(err, d) {
+            isFetchingLinks = false
+            if (err) { linksError = err; return }
+            if (d && d.error) { linksError = d.error; return }
+            selectedLink = d
+        })
     }
 
     function clearStreamLinks() {

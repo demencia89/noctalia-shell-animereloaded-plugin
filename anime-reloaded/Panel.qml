@@ -61,7 +61,7 @@ Item {
     property int browseStack: 0
     property int libraryStack: 0
     property int feedStack: 0
-    property bool settingsOpen: false
+    property bool settingsOpen: anime?.panelSettingsOpen ?? false
 
     onPluginApiChanged: root._restoreLastTab()
 
@@ -73,6 +73,11 @@ Item {
             anime.fetchFollowingFeed(false)
             anime.markFeedNotificationsSeen()
         }
+    }
+
+    onSettingsOpenChanged: {
+        if (anime && anime.panelSettingsOpen !== settingsOpen)
+            anime.panelSettingsOpen = settingsOpen
     }
 
     Rectangle {
@@ -193,29 +198,27 @@ Item {
                 }
 
                 ShaderEffectSource {
-                    id: blurredContentSource
+                    id: settingsBackdropSource
                     anchors.fill: contentStack
-                    sourceItem: contentStack
-                    live: true
-                    recursive: true
                     visible: root.settingsOpen
+                    live: root.settingsOpen
                     hideSource: false
+                    recursive: true
+                    sourceItem: contentStack
                 }
 
                 FastBlur {
                     anchors.fill: contentStack
-                    source: blurredContentSource
-                    radius: 56
-                    transparentBorder: true
                     visible: root.settingsOpen
-                    opacity: root.settingsOpen ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    source: settingsBackdropSource
+                    radius: 28
+                    transparentBorder: true
                 }
 
                 Rectangle {
                     anchors.fill: contentStack
                     visible: root.settingsOpen
-                    color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.56)
+                    color: Qt.rgba(Color.mSurface.r, Color.mSurface.g, Color.mSurface.b, 0.7)
                     opacity: root.settingsOpen ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                 }

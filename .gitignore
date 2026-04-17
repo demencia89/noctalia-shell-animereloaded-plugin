@@ -1,13 +1,25 @@
 .aider*
 .codex
+.opencode/
+openspec/
+.claude
+
+# Runtime / user data
 settings.json
+*/settings.json
+progress/
+**/progress/
 anime-library.json
 anime-feed-cache.json
 anime-reloaded-library.json
 anime-reloaded-feed-cache.json
 anime-reloaded-provider-map.json
 anime-reloaded-mal-config.json
-anime-reloaded/anime-reloaded-anilist-cache.json
-progress/
+**/*-library.json
+**/*-feed-cache.json
+**/*-provider-map.json
+**/*-mal-config.json
+**/forge.cache.js
 __pycache__/
+**/__pycache__/
 *.pyc

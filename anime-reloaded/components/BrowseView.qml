@@ -474,7 +474,6 @@ Item {
                 delegate: ChoiceChip {
                     readonly property bool active: (modelData === "All" && (anime?.currentGenre ?? "") === "") ||
                                                    (anime?.currentGenre === modelData)
-                    anchors.verticalCenter: parent.verticalCenter
                     text: modelData
                     selected: active
                     controlHeight: 32
@@ -881,7 +880,14 @@ Item {
                                     id: titleBar
                                     anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
                                     height: titleText.implicitHeight + 14
-                                    color: Color.mSurfaceVariant; radius: 10
+                                    color: Color.mSurfaceVariant
+                                    radius: 10
+
+                                    Rectangle {
+                                        anchors { top: parent.top; left: parent.left; right: parent.right }
+                                        height: parent.radius
+                                        color: parent.color
+                                    }
 
                                     Text {
                                         id: titleText
@@ -902,13 +908,25 @@ Item {
                                 Rectangle {
                                     id: posterWrapper
                                     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: titleBar.top }
-                                    radius: 10; clip: true; color: "transparent"
+                                    radius: 10
+                                    clip: true
+                                    color: "transparent"
                                     layer.enabled: true
                                     layer.effect: OpacityMask {
-                                        maskSource: Rectangle {
+                                        maskSource: Item {
                                             width: posterWrapper.width
                                             height: posterWrapper.height
-                                            radius: posterWrapper.radius
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: posterWrapper.radius
+                                                color: "black"
+                                            }
+
+                                            Rectangle {
+                                                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                                height: posterWrapper.radius
+                                                color: "black"
+                                            }
                                         }
                                     }
 

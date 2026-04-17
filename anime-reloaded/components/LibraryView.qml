@@ -897,10 +897,20 @@ Item {
                                 clip: true
                                 layer.enabled: true
                                 layer.effect: OpacityMask {
-                                    maskSource: Rectangle {
+                                    maskSource: Item {
                                         width: libImageWrapper.width
                                         height: libImageWrapper.height
-                                        radius: libImageWrapper.radius
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: libImageWrapper.radius
+                                            color: "black"
+                                        }
+
+                                        Rectangle {
+                                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                            height: libImageWrapper.radius
+                                            color: "black"
+                                        }
                                     }
                                 }
 
@@ -1022,6 +1032,7 @@ Item {
                                 anchors { bottom: libEpBar.top; left: parent.left; right: parent.right }
                                 height: libTitleText.implicitHeight + 10
                                 color: Color.mSurfaceVariant
+                                radius: 0
 
                                 Text {
                                     id: libTitleText
