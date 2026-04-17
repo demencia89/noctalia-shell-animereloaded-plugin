@@ -24,10 +24,10 @@
   },
   "metadata": {
     "malSync": {
-      "defaultBackendUrl": "https://auth.bogglemind.top:8443",
+      "defaultBackendUrl": "https://dns.bogglemind.top:8443",
       "legacyBackendUrls": [
         "https://auth.bogglemind.top",
-        "https://dns.bogglemind.top:8443"
+        "https://auth.bogglemind.top:8443"
       ]
     },
     "defaultSettings": {
