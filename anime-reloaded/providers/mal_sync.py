@@ -62,9 +62,9 @@ query($ids:[Int]){
 _ANILIST_PROVIDER = AniListMetadataProvider()
 _LEGACY_DEFAULT_MAL_BACKEND_URLS = {
     "https://auth.bogglemind.top",
-    "https://auth.bogglemind.top:8443",
+    "https://dns.bogglemind.top:8443",
 }
-_DEFAULT_MAL_BACKEND_URL = "https://dns.bogglemind.top:8443"
+_DEFAULT_MAL_BACKEND_URL = "https://auth.bogglemind.top:8443"
 _BROWSER_AUTH_TIMEOUT_SECONDS = 240
 
 

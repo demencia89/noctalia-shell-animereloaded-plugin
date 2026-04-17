@@ -25,10 +25,10 @@
   "metadata": {
     "runtimeRoot": "anime-reloaded",
     "malSync": {
-      "defaultBackendUrl": "https://dns.bogglemind.top:8443",
+      "defaultBackendUrl": "https://auth.bogglemind.top:8443",
       "legacyBackendUrls": [
         "https://auth.bogglemind.top",
-        "https://auth.bogglemind.top:8443"
+        "https://dns.bogglemind.top:8443"
       ]
     },
     "defaultSettings": {
