@@ -2,6 +2,10 @@
 
 Standalone repository for the AnimeReloaded plugin. The actual plugin code lives in `anime-reloaded/`, while the root `manifest.json` is kept as a compatibility wrapper for local Noctalia installs.
 
+## Support
+
+If you want to support ongoing work on AnimeReloaded and the surrounding Noctalia projects, sponsor the work through GitHub Sponsors at [@demencia89](https://github.com/sponsors/demencia89).
+
 ## Features
 
 - Browse, search, and show details with AniList metadata
