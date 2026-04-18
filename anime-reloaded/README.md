@@ -14,6 +14,18 @@ Anime plugin for Noctalia Shell. AniList metadata, AllAnime streams, AniList acc
 - Sync summaries are sent to Noctalia notification history as well as shell toasts
 - Bar widget, panel, and settings integration
 
+## Connect AniList
+
+1. Create an AniList application in AniList developer settings.
+2. Use `https://anilist.co/api/v2/oauth/pin` as the redirect URI for that app.
+3. Copy the AniList client ID.
+4. Open AnimeReloaded settings in Noctalia and go to `AniList Sync`.
+5. Paste the client ID into `AniList Client ID`.
+6. Click `Open AniList Login` and approve the request in your browser.
+7. Paste the returned callback URL or raw token into `Callback URL or Access Token`.
+8. Click `Finish Connect`.
+9. Use `Pull From AniList`, `Push To AniList`, or enable `Auto Push` depending on how you want synchronization to behave.
+
 ## Architecture
 
 All provider logic runs in-process via QML JavaScript. No Python runtime or external provider process.

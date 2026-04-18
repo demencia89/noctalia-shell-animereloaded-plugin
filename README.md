@@ -34,6 +34,19 @@ Clone this repository into your Noctalia plugins directory, then enable `AnimeRe
 └── AnimeReloaded/
 ```
 
+## Connect AniList
+
+1. Open AniList developer settings and create an application for AnimeReloaded.
+2. Set the application's redirect URI to `https://anilist.co/api/v2/oauth/pin`.
+3. Copy the AniList client ID.
+4. In Noctalia, open the AnimeReloaded settings and find the `AniList Sync` section.
+5. Paste the client ID into `AniList Client ID`.
+6. Click the `Redirect URI` pill if you want the plugin to copy the exact URI to your clipboard.
+7. Click `Open AniList Login` and approve the app in your browser.
+8. When AniList shows the callback URL or access token, paste it into `Callback URL or Access Token`.
+9. Click `Finish Connect`.
+10. After connection, use `Pull From AniList` to import remote progress, `Push To AniList` to send local progress, or enable `Auto Push` if you want local watch changes synced automatically.
+
 ## Architecture
 
 All provider logic runs in-process via QML JavaScript. No Python runtime is required.
