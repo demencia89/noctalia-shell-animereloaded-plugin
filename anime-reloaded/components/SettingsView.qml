@@ -2,9 +2,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml
+import Qt5Compat.GraphicalEffects
 import Quickshell
 import qs.Commons
 import qs.Services.UI
+import qs.Widgets
 
 Item {
     id: settingsView
@@ -42,6 +44,19 @@ Item {
 
     signal backRequested()
 
+    layer.enabled: visible
+    layer.effect: OpacityMask {
+        maskSource: Rectangle {
+            width: settingsView.width
+            height: settingsView.height
+            color: _themeColor("mOnSurface", Color.mOnSurface)
+            topLeftRadius: Style.radiusL
+            topRightRadius: Style.radiusL
+            bottomLeftRadius: 0
+            bottomRightRadius: 0
+        }
+    }
+
     onAniListConnectedChanged: {
         if (aniListConnected) {
             aniListAuthInput = ""
@@ -69,12 +84,13 @@ Item {
     }
 
     function _surfaceColor() {
-        return _themeColor("mSurface", Qt.rgba(0.11, 0.12, 0.14, 1))
+        return _themeColor("mSurface",
+            _themeColor("mBackground", Color.mSurface))
     }
 
     function _surfaceVariantColor() {
         return _themeColor("mSurfaceVariant",
-            Qt.tint(_surfaceColor(), Qt.rgba(1, 1, 1, 0.06)))
+            Qt.tint(_surfaceColor(), _withAlpha(_themeColor("mOnSurface", Color.mOnSurface), 0.06)))
     }
 
     function _cardFill(tintColor, tintStrength, baseAlpha) {
@@ -94,7 +110,7 @@ Item {
 
     function _cardHighlight(tintColor, alpha) {
         if (!tintColor)
-            return Qt.rgba(1, 1, 1, 0.03)
+            return _withAlpha(_themeColor("mOnSurface", Color.mOnSurface), 0.03)
         return _withAlpha(tintColor, alpha === undefined ? 0.08 : alpha)
     }
 
@@ -795,7 +811,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // ── Header ────────────────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────────────
         Rectangle {
             Layout.fillWidth: true
             height: 68
@@ -1146,6 +1162,122 @@ Item {
                                 font.pixelSize: 10
                                 color: Color.mOnSurfaceVariant
                                 opacity: 0.72
+                            }
+                        }
+                    }
+
+                    SettingsCard {
+                        width: parent.width
+                        tintColor: Color.mPrimary
+                        tintStrength: 0.06
+
+                        Row {
+                            spacing: 10
+
+                            Rectangle {
+                                width: 30
+                                height: 30
+                                radius: 15
+                                color: Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.12)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "↓"
+                                    font.pixelSize: 13
+                                    color: Color.mPrimary
+                                }
+                            }
+
+                            Column {
+                                spacing: 2
+
+                                Text {
+                                    text: "Episode Downloads"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: Color.mOnSurface
+                                }
+
+                                Text {
+                                    text: "Pick a folder for saved episodes. Leave it empty to keep using the default AnimeReloaded downloads folder."
+                                    font.pixelSize: 11
+                                    color: Color.mOnSurfaceVariant
+                                    opacity: 0.72
+                                    wrapMode: Text.Wrap
+                                }
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            spacing: 6
+
+                            Text {
+                                text: "Download Folder"
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: Color.mOnSurface
+                            }
+
+                            SettingTextField {
+                                width: parent.width
+                                value: anime?.episodeDownloadPath || ""
+                                placeholderText: anime?.defaultEpisodeDownloadPath || ""
+                                onTextEdited: function(text) {
+                                    if (anime)
+                                        anime.setSetting("episodeDownloadPath", text)
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "Current location: " + String(anime?.effectiveEpisodeDownloadPath || "")
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.35
+                            font.pixelSize: 10
+                            color: Color.mOnSurfaceVariant
+                            opacity: 0.74
+                        }
+
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+
+                            ActionChip {
+                                text: "Choose Folder"
+                                leadingText: "↓"
+                                onClicked: downloadFolderPicker.openFilePicker()
+                            }
+
+                            ActionChip {
+                                text: "Use Default"
+                                leadingText: "↺"
+                                visible: String(anime?.episodeDownloadPath || "").trim().length > 0
+                                onClicked: if (anime) anime.setSetting("episodeDownloadPath", "")
+                            }
+                        }
+
+                        Text {
+                            visible: anime?.isDownloadingEpisode ?? false
+                            width: parent.width
+                            text: "A download is currently in progress."
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.35
+                            font.pixelSize: 10
+                            color: Color.mPrimary
+                            opacity: 0.9
+                        }
+
+                        NFilePicker {
+                            id: downloadFolderPicker
+                            title: "Select episode download folder"
+                            initialPath: anime?.effectiveEpisodeDownloadPath || anime?.defaultEpisodeDownloadPath || ""
+                            selectionMode: "folders"
+
+                            onAccepted: function(paths) {
+                                if (paths.length > 0 && anime)
+                                    anime.setSetting("episodeDownloadPath", paths[0])
                             }
                         }
                     }

@@ -903,13 +903,13 @@ Item {
                                         Rectangle {
                                             anchors.fill: parent
                                             radius: libImageWrapper.radius
-                                            color: "black"
+                                            color: _themeColor("mOnSurface", Color.mOnSurface)
                                         }
 
                                         Rectangle {
                                             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                                             height: libImageWrapper.radius
-                                            color: "black"
+                                            color: _themeColor("mOnSurface", Color.mOnSurface)
                                         }
                                     }
                                 }

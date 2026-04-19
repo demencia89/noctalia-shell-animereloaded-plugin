@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -47,6 +48,40 @@ Item {
         return _pathJoin(_pathJoin(pluginApi?.pluginDir ?? "", runtimeRoot), relativePath)
     }
 
+    function _localPathFromUrl(value) {
+        var text = String(value || "").trim()
+        if (text.indexOf("file://localhost/") === 0)
+            text = text.substring("file://localhost".length)
+        else if (text.indexOf("file://") === 0)
+            text = text.substring("file://".length)
+        return decodeURIComponent(text)
+    }
+
+    function _normaliseDirectoryPath(value) {
+        var text = String(value || "").trim()
+        if (text.length === 0)
+            return ""
+        if (text.indexOf("file://") === 0)
+            text = _localPathFromUrl(text)
+        text = text.replace(/\/+$/, "")
+        if (text.length === 0)
+            return "/"
+        return text
+    }
+
+    function _defaultDownloadsRoot() {
+        var locations = StandardPaths.standardLocations(StandardPaths.DownloadLocation)
+        if (locations && locations.length > 0 && String(locations[0] || "").length > 0)
+            return String(locations[0])
+        var home = String(StandardPaths.writableLocation(StandardPaths.HomeLocation) || "")
+        return home.length > 0 ? _pathJoin(home, "Downloads") : ""
+    }
+
+    function _buildDefaultEpisodeDownloadPath() {
+        var base = _normaliseDirectoryPath(_defaultDownloadsRoot())
+        return base.length > 0 ? _pathJoin(base, "AnimeReloaded") : ""
+    }
+
     readonly property string luaPath:
         _runtimePath("progress.lua")
     readonly property string progressDir:
@@ -73,12 +108,24 @@ Item {
         pluginApi?.manifest?.metadata?.defaultSettings?.streamProvider ||
         pluginApi?.manifest?.metadata?.providers?.stream?.default ||
         "allanime"
+    property string episodeDownloadPath:
+        _normaliseDirectoryPath(pluginApi?.pluginSettings?.episodeDownloadPath || "")
+    readonly property string defaultEpisodeDownloadPath:
+        _buildDefaultEpisodeDownloadPath()
+    readonly property string effectiveEpisodeDownloadPath:
+        episodeDownloadPath.length > 0 ? episodeDownloadPath : defaultEpisodeDownloadPath
     property var    aniListSync: _normaliseAniListSync(pluginApi?.pluginSettings?.aniListSync)
     property var    malSync: _normaliseMalSync(pluginApi?.pluginSettings?.malSync)
     property var    browseCache: ({})
     property var    detailCache: ({})
     property bool   panelSettingsOpen: false
     property string aniListAuthDraft: ""
+    property bool   isDownloadingEpisode: false
+    property string downloadingShowId: ""
+    property string downloadingEpisodeNumber: ""
+    property string activeDownloadStatusId: ""
+    property string cancellingDownloadStatusId: ""
+    property var    episodeDownloadQueue: []
 
     function _preferredPanelScreen() {
         if (pluginApi?.panelOpenScreen)
@@ -847,6 +894,338 @@ Item {
         return String(show?.englishName || show?.name || "Untitled")
     }
 
+    function _safeFileNamePart(value, fallback) {
+        var text = String(value || "").replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
+        text = text.replace(/\s+/g, " ").trim()
+        return text.length > 0 ? text : String(fallback || "Episode")
+    }
+
+    function _episodeDownloadFilePath(show, epNum) {
+        var title = _safeFileNamePart(_showTitle(show), "Anime")
+        var episode = _safeFileNamePart("Ep " + String(epNum || "?"), "Ep")
+        return _pathJoin(effectiveEpisodeDownloadPath, title + " - " + episode + ".mp4")
+    }
+
+    function _downloadHeaderString(headers) {
+        var lines = []
+        var map = headers || ({})
+        Object.keys(map).forEach(function(key) {
+            var name = String(key || "").trim()
+            var value = String(map[key] || "").trim()
+            if (name.length > 0 && value.length > 0)
+                lines.push(name + ": " + value)
+        })
+        return lines.length > 0 ? (lines.join("\r\n") + "\r\n") : ""
+    }
+
+    function _clearEpisodeDownloadState() {
+        isDownloadingEpisode = false
+        downloadingShowId = ""
+        downloadingEpisodeNumber = ""
+    }
+
+    function _downloadToast(message, duration) {
+        ToastService.showNotice(
+            "AnimeReloaded",
+            String(message || ""),
+            "device-tv",
+            duration === undefined ? 3200 : duration
+        )
+    }
+
+    function _downloadStatusId(showId, episodeNumber) {
+        return String(showId || "") + ":" + String(episodeNumber || "") + ":" + String(Date.now()) + ":" + String(Math.random()).slice(2, 8)
+    }
+
+    function _downloadStatusLabel(state) {
+        var key = String(state || "").toLowerCase()
+        if (key === "resolving")
+            return "Resolving"
+        if (key === "preparing")
+            return "Preparing"
+        if (key === "downloading")
+            return "Downloading"
+        if (key === "completed")
+            return "Completed"
+        if (key === "failed")
+            return "Failed"
+        return "Queued"
+    }
+
+    function _downloadStatusTone(state) {
+        var key = String(state || "").toLowerCase()
+        if (key === "failed")
+            return "error"
+        if (key === "completed")
+            return "success"
+        return "active"
+    }
+
+    function _isPendingDownloadState(state) {
+        var key = String(state || "").toLowerCase()
+        return key === "queued"
+            || key === "resolving"
+            || key === "preparing"
+            || key === "downloading"
+    }
+
+    function _findPendingEpisodeDownloadItem(showId, episodeNumber) {
+        var targetShowId = String(showId || "")
+        var targetEpisodeNumber = String(episodeNumber || "")
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems : []
+        for (var i = list.length - 1; i >= 0; i--) {
+            var item = list[i] || ({})
+            if (String(item.showId || "") !== targetShowId)
+                continue
+            if (String(item.episodeNumber || "") !== targetEpisodeNumber)
+                continue
+            if (_isPendingDownloadState(item.state))
+                return item
+        }
+        return null
+    }
+
+    function getEpisodeDownloadState(showId, episodeNumber) {
+        var item = _findPendingEpisodeDownloadItem(showId, episodeNumber)
+        return item ? String(item.state || "") : ""
+    }
+
+    function _isEpisodeDownloadProcessRunning() {
+        return episodeDownloadPrepareProc.running || episodeDownloadProc.running
+    }
+
+    function _resetEpisodeDownloadPrepareProc() {
+        episodeDownloadPrepareProc._statusId = ""
+        episodeDownloadPrepareProc._title = ""
+        episodeDownloadPrepareProc._episode = ""
+        episodeDownloadPrepareProc._directory = ""
+        episodeDownloadPrepareProc._finalPath = ""
+        episodeDownloadPrepareProc._tempPath = ""
+        episodeDownloadPrepareProc._link = ({})
+        episodeDownloadPrepareProc._stderrTail = ""
+    }
+
+    function _resetEpisodeDownloadProc() {
+        episodeDownloadProc._statusId = ""
+        episodeDownloadProc._title = ""
+        episodeDownloadProc._episode = ""
+        episodeDownloadProc._directory = ""
+        episodeDownloadProc._finalPath = ""
+        episodeDownloadProc._tempPath = ""
+        episodeDownloadProc._stderrTail = ""
+    }
+
+    function _releaseActiveEpisodeDownload(statusId) {
+        if (String(activeDownloadStatusId || "") === String(statusId || ""))
+            activeDownloadStatusId = ""
+        _clearEpisodeDownloadState()
+    }
+
+    function _startNextQueuedEpisodeDownload() {
+        if (String(activeDownloadStatusId || "").length > 0 || isDownloadingEpisode || _isEpisodeDownloadProcessRunning())
+            return
+        var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+        if (queue.length === 0)
+            return
+        var nextJob = _deepClone(queue.shift() || {})
+        episodeDownloadQueue = queue
+        _startQueuedEpisodeDownload(nextJob)
+    }
+
+    function _startQueuedEpisodeDownload(job) {
+        var item = _deepClone(job || {})
+        var show = _deepClone(item.show || {})
+        var statusId = String(item.statusId || "")
+        var episodeNumber = String(item.episodeNumber || "")
+        var showId = String(item.showId || show?.id || "")
+        var title = String(item.title || _showTitle(show))
+        var targetDir = String(item.targetDir || effectiveEpisodeDownloadPath)
+        var targetPath = String(item.targetPath || _episodeDownloadFilePath(show, episodeNumber))
+
+        if (statusId.length === 0 || showId.length === 0 || episodeNumber.length === 0) {
+            _startNextQueuedEpisodeDownload()
+            return
+        }
+
+        activeDownloadStatusId = statusId
+        isDownloadingEpisode = true
+        downloadingShowId = showId
+        downloadingEpisodeNumber = episodeNumber
+
+        _setDownloadStatusState(
+            statusId,
+            "resolving",
+            "Looking up the best available source."
+        )
+
+        _downloadToast("Resolving " + title + " · Ep. " + episodeNumber + " for download.", 2200)
+
+        _resolveEpisodeStream(show, episodeNumber, function(err, d) {
+            if (String(root.activeDownloadStatusId || "") !== statusId)
+                return
+
+            if (err) {
+                root._setDownloadStatusState(
+                    statusId,
+                    "failed",
+                    String(err || "Could not resolve the episode stream."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(statusId)
+                root._downloadToast("Download failed: " + err, 4200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+            if (!d || d.error || !d.url) {
+                root._setDownloadStatusState(
+                    statusId,
+                    "failed",
+                    String(d?.error || "No downloadable stream was returned."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(statusId)
+                root._downloadToast("Download failed: " + String(d?.error || "No downloadable stream was returned."), 4200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            root._setDownloadStatusState(
+                statusId,
+                "preparing",
+                "Preparing the download folder."
+            )
+            episodeDownloadPrepareProc._statusId = statusId
+            episodeDownloadPrepareProc._title = title
+            episodeDownloadPrepareProc._episode = episodeNumber
+            episodeDownloadPrepareProc._directory = targetDir
+            episodeDownloadPrepareProc._finalPath = targetPath
+            episodeDownloadPrepareProc._tempPath = episodeDownloadPrepareProc._finalPath + ".part"
+            episodeDownloadPrepareProc._link = root._deepClone(d)
+            episodeDownloadPrepareProc._stderrTail = ""
+            episodeDownloadPrepareProc.command = ["mkdir", "-p", targetDir]
+            episodeDownloadPrepareProc.running = true
+        })
+    }
+
+    function _trimDownloadStatusItems(items) {
+        var list = Array.isArray(items) ? items.slice() : []
+        if (list.length <= 12)
+            return list
+        return list.slice(Math.max(0, list.length - 12))
+    }
+
+    function _addDownloadStatusItem(item) {
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        list.push(_deepClone(item))
+        downloadStatusItems = _trimDownloadStatusItems(list)
+    }
+
+    function _updateDownloadStatusItem(statusId, changes) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = 0; i < list.length; i++) {
+            if (String((list[i] || {}).id || "") !== targetId)
+                continue
+            list[i] = Object.assign({}, list[i] || {}, _deepClone(changes || {}), {
+                updatedAt: Date.now()
+            })
+            downloadStatusItems = list
+            return
+        }
+    }
+
+    function _setDownloadStatusState(statusId, state, detail, extraChanges) {
+        _updateDownloadStatusItem(statusId, Object.assign({}, extraChanges || {}, {
+            state: String(state || ""),
+            stateLabel: _downloadStatusLabel(state),
+            tone: _downloadStatusTone(state),
+            detail: String(detail || "")
+        }))
+    }
+
+    function _removeDownloadStatusItem(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = list.length - 1; i >= 0; i--) {
+            if (String((list[i] || {}).id || "") !== targetId)
+                continue
+            list.splice(i, 1)
+        }
+        downloadStatusItems = list
+    }
+
+    function clearCompletedDownloadStatus(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+        var list = Array.isArray(downloadStatusItems) ? downloadStatusItems.slice() : []
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i] || ({})
+            if (String(item.id || "") !== targetId)
+                continue
+            if (String(item.state || "").toLowerCase() === "completed")
+                _removeDownloadStatusItem(targetId)
+            return
+        }
+    }
+
+    function cancelEpisodeDownloadStatus(statusId) {
+        var targetId = String(statusId || "")
+        if (targetId.length === 0)
+            return
+
+        if (String(activeDownloadStatusId || "") === targetId) {
+            if (_isEpisodeDownloadProcessRunning()) {
+                cancellingDownloadStatusId = targetId
+                if (episodeDownloadProc.running)
+                    episodeDownloadProc.running = false
+                else if (episodeDownloadPrepareProc.running)
+                    episodeDownloadPrepareProc.running = false
+                return
+            }
+
+            _releaseActiveEpisodeDownload(targetId)
+            _removeDownloadStatusItem(targetId)
+            _downloadToast("Canceled episode download.", 2200)
+            _startNextQueuedEpisodeDownload()
+            return
+        }
+
+        var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+        var removed = false
+        for (var i = queue.length - 1; i >= 0; i--) {
+            if (String((queue[i] || {}).statusId || "") !== targetId)
+                continue
+            queue.splice(i, 1)
+            removed = true
+        }
+        if (removed) {
+            episodeDownloadQueue = queue
+            _removeDownloadStatusItem(targetId)
+            _downloadToast("Removed from download queue.", 2200)
+        }
+    }
+
+    function openDownloadLocation(targetPath) {
+        var path = String(targetPath || "").trim()
+        if (path.length === 0)
+            return
+        openDownloadLocationProc._path = path
+        openDownloadLocationProc.command = [
+            "sh", "-c",
+            "command -v xdg-open >/dev/null 2>&1 || exit 127; " +
+            "target=\"$1\"; [ -n \"$target\" ] || exit 1; " +
+            "if [ -d \"$target\" ]; then xdg-open \"$target\"; else xdg-open \"$(dirname \"$target\")\"; fi",
+            "sh",
+            path
+        ]
+        openDownloadLocationProc.running = true
+    }
+
     function _showMalId(show) {
         var syncRef = show?.providerRefs?.sync
         if (String(syncRef?.provider || "") === "myanimelist" && String(syncRef?.id || "").length > 0)
@@ -1123,6 +1502,8 @@ Item {
         if (key === "preferredProvider") preferredProvider = val
         if (key === "metadataProvider") metadataProviderId = val
         if (key === "streamProvider") streamProviderId = val
+        if (key === "episodeDownloadPath")
+            episodeDownloadPath = _normaliseDirectoryPath(val)
 
         if (key === "panelSize") {
             panelSize = val
@@ -1132,7 +1513,7 @@ Item {
         }
         
         if (pluginApi) {
-            pluginApi.pluginSettings[key] = val
+            pluginApi.pluginSettings[key] = key === "episodeDownloadPath" ? episodeDownloadPath : val
             if (key === "panelSize" || key === "posterSize")
                 pluginApi.pluginSettings.posterSize = posterSize
             pluginApi.saveSettings()
@@ -1204,6 +1585,9 @@ Item {
     property bool   _suppressMalAutoPush: false
     property bool   _pendingMalBrowserAuth: false
     property string _pendingMalBrowserAuthUrl: ""
+
+    // ── Download status state ────────────────────────────────────────────────
+    property var    downloadStatusItems: []
 
     // ── Library view state ───────────────────────────────────────────────────
     property real libraryScrollY: 0
@@ -2075,6 +2459,16 @@ Item {
     // ── Utility processes ────────────────────────────────────────────────────
     Process { id: mkdirProc }
     Process { id: rmProc }
+    Process {
+        id: openDownloadLocationProc
+        property string _path: ""
+
+        onExited: function(exitCode) {
+            if (exitCode !== 0)
+                root._downloadToast("Could not open the download location.", 2600)
+            _path = ""
+        }
+    }
 
     // Writes forge cache to disk after CDN download
     Process {
@@ -2094,6 +2488,178 @@ Item {
         // Download directly via curl — keeps command tiny, no content in Process args
         forgeCacheWriteProc.command = ["curl", "-sL", "-o", cachePath, cdnUrl]
         forgeCacheWriteProc.running = true
+    }
+
+    Process {
+        id: episodeDownloadPrepareProc
+
+        property string _statusId: ""
+        property string _title: ""
+        property string _episode: ""
+        property string _directory: ""
+        property string _finalPath: ""
+        property string _tempPath: ""
+        property var _link: ({})
+        property string _stderrTail: ""
+
+        onExited: function(exitCode) {
+            if (String(root.cancellingDownloadStatusId || "") === String(_statusId || "")) {
+                var cancelledStatusId = String(_statusId || "")
+                root._removeDownloadStatusItem(cancelledStatusId)
+                root._releaseActiveEpisodeDownload(cancelledStatusId)
+                root.cancellingDownloadStatusId = ""
+                root._resetEpisodeDownloadPrepareProc()
+                root._downloadToast("Canceled episode download.", 2200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            if (exitCode !== 0) {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "failed",
+                    String(_stderrTail || "Could not prepare the download folder."),
+                    { completedAt: Date.now() }
+                )
+                root._releaseActiveEpisodeDownload(_statusId)
+                root._downloadToast(
+                    "Download failed: " + String(_stderrTail || "Could not prepare the download folder."),
+                    4200
+                )
+                root._resetEpisodeDownloadPrepareProc()
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            var link = _link || ({})
+            var headers = root._deepClone(link.http_headers || {})
+            var referer = String(link.referer || headers.Referer || headers.Referrer || "")
+            var userAgent = String(headers["User-Agent"] || "Mozilla/5.0")
+            if (referer.length > 0)
+                headers.Referer = referer
+            headers["User-Agent"] = userAgent
+
+            episodeDownloadProc._statusId = _statusId
+            episodeDownloadProc._title = _title
+            episodeDownloadProc._episode = _episode
+            episodeDownloadProc._directory = _directory
+            episodeDownloadProc._finalPath = _finalPath
+            episodeDownloadProc._tempPath = _tempPath
+            episodeDownloadProc._stderrTail = ""
+
+            root._setDownloadStatusState(
+                _statusId,
+                "downloading",
+                "Saving to " + _finalPath
+            )
+
+            if (String(link.type || "").toLowerCase() === "hls") {
+                episodeDownloadProc.command = [
+                    "sh", "-c",
+                    "command -v ffmpeg >/dev/null 2>&1 || { printf 'ffmpeg is required for HLS downloads\\n' >&2; exit 127; }; " +
+                    "rm -f \"$4\"; trap 'rm -f \"$4\"' EXIT; " +
+                    "ffmpeg -y -nostdin -hide_banner -loglevel error -headers \"$1\" -i \"$2\" -c copy -bsf:a aac_adtstoasc \"$4\"; " +
+                    "mv -f \"$4\" \"$3\"",
+                    "sh",
+                    root._downloadHeaderString(headers),
+                    String(link.url || ""),
+                    _finalPath,
+                    _tempPath
+                ]
+            } else {
+                episodeDownloadProc.command = [
+                    "sh", "-c",
+                    "command -v curl >/dev/null 2>&1 || { printf 'curl is required for direct downloads\\n' >&2; exit 127; }; " +
+                    "rm -f \"$4\"; trap 'rm -f \"$4\"' EXIT; " +
+                    "curl -L --fail --silent --show-error --remove-on-error -A \"$1\" -e \"$2\" -o \"$4\" \"$5\"; " +
+                    "mv -f \"$4\" \"$3\"",
+                    "sh",
+                    userAgent,
+                    referer,
+                    _finalPath,
+                    _tempPath,
+                    String(link.url || "")
+                ]
+            }
+
+            root._downloadToast(
+                "Downloading " + _title + " · Ep. " + _episode + ".",
+                2200
+            )
+            episodeDownloadProc.running = true
+            root._resetEpisodeDownloadPrepareProc()
+        }
+
+        stderr: SplitParser {
+            onRead: function(data) {
+                var line = String(data || "").trim()
+                if (line.length > 0)
+                    episodeDownloadPrepareProc._stderrTail = line
+            }
+        }
+    }
+
+    Process {
+        id: episodeDownloadProc
+
+        property string _statusId: ""
+        property string _title: ""
+        property string _episode: ""
+        property string _directory: ""
+        property string _finalPath: ""
+        property string _tempPath: ""
+        property string _stderrTail: ""
+
+        onExited: function(exitCode) {
+            if (String(root.cancellingDownloadStatusId || "") === String(_statusId || "")) {
+                var cancelledStatusId = String(_statusId || "")
+                root._removeDownloadStatusItem(cancelledStatusId)
+                root._releaseActiveEpisodeDownload(cancelledStatusId)
+                root.cancellingDownloadStatusId = ""
+                root._resetEpisodeDownloadProc()
+                root._downloadToast("Canceled episode download.", 2200)
+                root._startNextQueuedEpisodeDownload()
+                return
+            }
+
+            if (exitCode === 0) {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "completed",
+                    "Saved to " + _finalPath,
+                    { completedAt: Date.now() }
+                )
+                root._downloadToast(
+                    "Downloaded " + _title + " · Ep. " + _episode + ".",
+                    3600
+                )
+            } else {
+                root._setDownloadStatusState(
+                    _statusId,
+                    "failed",
+                    String(_stderrTail || "The downloader exited with code " + exitCode + "."),
+                    { completedAt: Date.now() }
+                )
+                root._downloadToast(
+                    "Download failed: " + String(_stderrTail || "The downloader exited with code " + exitCode + "."),
+                    4200
+                )
+            }
+
+            root._releaseActiveEpisodeDownload(_statusId)
+            root._resetEpisodeDownloadProc()
+            root._startNextQueuedEpisodeDownload()
+        }
+
+        stderr: SplitParser {
+            onRead: function(data) {
+                var line = String(data || "").trim()
+                if (line.length === 0)
+                    return
+                episodeDownloadProc._stderrTail = line
+                Logger.w("AnimeReloaded", "download:", line)
+            }
+        }
     }
 
     // ── AniList sync result handler ──────────────────────────────────────────
@@ -2655,6 +3221,23 @@ Item {
         pendingAutoPlayShowId = ""
     }
 
+    function _resolveEpisodeStream(show, epNum, callback) {
+        if (!show) {
+            callback("No anime is selected.")
+            return
+        }
+        var showStreamProvider = _showStreamProviderId(show)
+        Providers.stream(showStreamProvider, "resolve", {
+            showId: _showMetadataId(show),
+            episodeNumber: String(epNum || ""),
+            mode: currentMode,
+            mirrorPref: preferredProvider,
+            qualityPref: "best",
+            title: _showTitle(show),
+            metadataProviderId: _showMetadataProviderId(show)
+        }, callback)
+    }
+
     function fetchStreamLinks(showId, epId, epNum) {
         if (!currentAnime) return
         _playingShowId  = showId
@@ -2665,21 +3248,76 @@ Item {
         playbackError   = ""
         selectedLink    = null
         isFetchingLinks = true
-        var showStreamProvider = _showStreamProviderId(currentAnime)
-        Providers.stream(showStreamProvider, "resolve", {
-            showId: _showMetadataId(currentAnime),
-            episodeNumber: String(epNum || ""),
-            mode: currentMode,
-            mirrorPref: preferredProvider,
-            qualityPref: "best",
-            title: _showTitle(currentAnime),
-            metadataProviderId: _showMetadataProviderId(currentAnime)
-        }, function(err, d) {
+        _resolveEpisodeStream(currentAnime, epNum, function(err, d) {
             isFetchingLinks = false
             if (err) { linksError = err; return }
             if (d && d.error) { linksError = d.error; return }
             selectedLink = d
         })
+    }
+
+    function downloadEpisode(show, epNum) {
+        if (!show)
+            return
+
+        var targetDir = effectiveEpisodeDownloadPath
+        if (targetDir.length === 0) {
+            _downloadToast("Choose a download folder before downloading episodes.", 3200)
+            return
+        }
+
+        var episodeNumber = String(epNum || "")
+        var showId = String(show?.id || "")
+        var title = _showTitle(show)
+        var existingItem = _findPendingEpisodeDownloadItem(showId, episodeNumber)
+        if (existingItem) {
+            var existingState = String(existingItem.state || "").toLowerCase()
+            _downloadToast(
+                existingState === "queued"
+                    ? "This episode is already waiting in the download queue."
+                    : "This episode is already being downloaded.",
+                2600
+            )
+            return
+        }
+
+        var statusId = _downloadStatusId(showId, episodeNumber)
+        var targetPath = _episodeDownloadFilePath(show, episodeNumber)
+        var job = {
+            id: statusId,
+            statusId: statusId,
+            showId: showId,
+            show: _deepClone(show),
+            episodeNumber: episodeNumber,
+            title: title,
+            targetDir: targetDir,
+            targetPath: targetPath,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            completedAt: 0
+        }
+
+        if (String(activeDownloadStatusId || "").length > 0 || isDownloadingEpisode || _isEpisodeDownloadProcessRunning()) {
+            _addDownloadStatusItem(Object.assign({}, job, {
+                state: "queued",
+                stateLabel: _downloadStatusLabel("queued"),
+                tone: _downloadStatusTone("queued"),
+                detail: "Waiting for the previous download to complete."
+            }))
+            var queue = Array.isArray(episodeDownloadQueue) ? episodeDownloadQueue.slice() : []
+            queue.push(job)
+            episodeDownloadQueue = queue
+            _downloadToast("Queued " + title + " · Ep. " + episodeNumber + ".", 2200)
+            return
+        }
+
+        _addDownloadStatusItem(Object.assign({}, job, {
+            state: "resolving",
+            stateLabel: _downloadStatusLabel("resolving"),
+            tone: _downloadStatusTone("resolving"),
+            detail: "Looking up the best available source."
+        }))
+        _startQueuedEpisodeDownload(job)
     }
 
     function clearStreamLinks() {
